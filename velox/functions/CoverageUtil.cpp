@@ -25,6 +25,50 @@
 
 namespace facebook::velox::functions {
 
+/// ListPrinter: Print a list, with helper functions to add list header and
+/// list item.
+class ListPrinter {
+ public:
+  ListPrinter(std::string indent,
+      std::ostream& out)
+      : indent_{std::move(indent)},
+        out_{out} {}
+
+  void addHeader(const std::string& headerText) {
+    out_ << std::left << headerText << std::endl;
+    out_ << std::left << std::string('#', 2 * headerText.size()) << std::endl;
+  }
+
+  void addItem(const std::string& item) {
+    out_ << std::left << std::setw(indent_.size()) << "* " << item << std::endl;
+  }
+
+  void addItem(const std::string& itemHeader, const std::vector<const exec::FunctionSignature*> list) {
+    out_ << std::left << "* " << itemHeader << std::endl;
+    for (auto item: list) {
+      addItem(item->toString());
+    }
+  }
+
+  void addItem(const std::string& itemHeader, std::vector<exec::FunctionSignature*> list) {
+    out_ << std::left << "* " << itemHeader << std::endl;
+    for (auto item: list) {
+      addItem(item->toString());
+    }
+  }
+
+  void addItem(const std::string& itemHeader, std::vector<exec::AggregateFunctionSignaturePtr> list) {
+    out_ << std::left << "* " << itemHeader << std::endl;
+    for (auto item: list) {
+      addItem(item->toString());
+    }
+  }
+
+ private:
+  const std::string indent_;
+  std::ostream& out_;
+};
+
 class TablePrinter {
  public:
   TablePrinter(
@@ -274,6 +318,73 @@ void printCoverageMap(
   std::cout << out.str() << std::endl;
 }
 
+void printFunctionsWithSignatures(
+    const FunctionType& functionType,
+    const std::vector<std::string>& functionNames,
+    const std::unordered_set<std::string>& veloxNames,
+    ListPrinter& listPrinter) {
+  auto printName = [&](const std::string& name) -> std::optional<std::string> {
+    if (veloxNames.count(name)) {
+      return toFuncLink(name, "");
+    } else {
+      return std::nullopt;
+    }
+  };
+
+  switch (functionType) {
+    case FunctionType::kScalar: {
+      listPrinter.addHeader("Scalar Functions");
+      auto functionSignatures = getFunctionSignatures();
+      for (auto functionName : functionNames) {
+        if (auto functionLink = printName(functionName)) {
+          listPrinter.addItem(
+              functionLink.value(), functionSignatures.at(functionName));
+        }
+      }
+      break;
+    }
+    case FunctionType::kAggregate: {
+      listPrinter.addHeader("Aggregate Functions");
+      for (auto functionName : functionNames) {
+        if (auto functionLink = printName(functionName)) {
+          auto aggregateFunctions =
+              exec::getAggregateFunctionSignatures(functionName);
+          listPrinter.addItem(functionLink.value(), aggregateFunctions.value());
+        }
+      }
+      break;
+    }
+    case FunctionType::kWindow: {
+      listPrinter.addHeader("Window Functions");
+      for (auto functionName : functionNames) {
+        if (auto functionLink = printName(functionName)) {
+          auto windowFunctionSignatures = exec::getWindowFunctionSignatures(functionName);
+          listPrinter.addItem(functionLink.value(), windowFunctionSignatures.value());
+        }
+      }
+      break;
+    }
+  }
+}
+
+void printCoverageMapWithSignatures(
+    const std::vector<std::string>& scalarNames,
+    const std::vector<std::string>& aggNames,
+    const std::vector<std::string>& windowNames,
+    const std::unordered_set<std::string>& veloxNames,
+    const std::unordered_set<std::string>& veloxAggNames,
+    const std::unordered_set<std::string>& veloxWindowNames) {
+  const std::string indent(3, ' ');
+  std::ostringstream out;
+  ListPrinter listPrinter(indent, out);
+
+  printFunctionsWithSignatures(FunctionType::kScalar, scalarNames, veloxNames, listPrinter);
+  printFunctionsWithSignatures(FunctionType::kAggregate, aggNames, veloxAggNames, listPrinter);
+  printFunctionsWithSignatures(FunctionType::kWindow, windowNames, veloxWindowNames, listPrinter);
+
+  std::cout << out.str() << std::endl;
+}
+
 // A function name is a companion function's if the name is an existing
 // aggregation functio name followed by a specific suffixes.
 bool isCompanionFunctionName(
@@ -361,7 +472,8 @@ void printCoverageMap(
     const std::vector<std::string>& scalarNames,
     const std::vector<std::string>& aggNames,
     const std::vector<std::string>& windowNames,
-    const std::string& domain = "") {
+    const std::string& domain = "",
+    const bool includeSignatures = false) {
   auto veloxFunctions = getFunctionSignatures();
 
   std::unordered_set<std::string> veloxNames;
@@ -389,14 +501,24 @@ void printCoverageMap(
         }
       });
 
-  printCoverageMap(
-      scalarNames,
-      aggNames,
-      windowNames,
-      veloxNames,
-      veloxAggNames,
-      veloxWindowNames,
-      domain);
+  if (includeSignatures) {
+    printCoverageMapWithSignatures(
+        scalarNames,
+        aggNames,
+        windowNames,
+        veloxNames,
+        veloxAggNames,
+        veloxWindowNames);
+  } else {
+    printCoverageMap(
+        scalarNames,
+        aggNames,
+        windowNames,
+        veloxNames,
+        veloxAggNames,
+        veloxWindowNames,
+        domain);
+  }
 }
 
 void printCoverageMapForAll(const std::string& domain) {
@@ -410,6 +532,19 @@ void printCoverageMapForAll(const std::string& domain) {
   std::sort(windowNames.begin(), windowNames.end());
 
   printCoverageMap(scalarNames, aggNames, windowNames, domain);
+}
+
+void printCoverageMapWithSignatures() {
+  auto scalarNames = readFunctionNamesFromFile("all_scalar_functions.txt");
+  std::sort(scalarNames.begin(), scalarNames.end());
+
+  auto aggNames = readFunctionNamesFromFile("all_aggregate_functions.txt");
+  std::sort(aggNames.begin(), aggNames.end());
+
+  auto windowNames = readFunctionNamesFromFile("all_window_functions.txt");
+  std::sort(windowNames.begin(), windowNames.end());
+
+  printCoverageMap(scalarNames, aggNames, windowNames, "", true);
 }
 
 void printVeloxFunctions(

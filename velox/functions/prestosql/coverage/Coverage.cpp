@@ -21,6 +21,10 @@
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/functions/prestosql/window/WindowFunctionsRegistration.h"
 
+DEFINE_bool(
+    signatures,
+    false,
+    "Generate coverage map for all Presto functions with signatures");
 DEFINE_bool(all, false, "Generate coverage map for all Presto functions");
 DEFINE_bool(
     most_used,
@@ -41,7 +45,9 @@ int main(int argc, char** argv) {
   // Register Presto window functions.
   window::prestosql::registerAllWindowFunctions();
 
-  if (FLAGS_all) {
+  if (FLAGS_signatures) {
+    functions::printCoverageMapWithSignatures();
+  } else if (FLAGS_all) {
     functions::printCoverageMapForAll();
   } else if (FLAGS_most_used) {
     functions::printCoverageMapForMostUsed();

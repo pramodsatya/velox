@@ -20,6 +20,12 @@
 
 namespace facebook::velox::functions {
 
+enum class FunctionType {
+  kScalar,
+  kAggregate,
+  kWindow,
+};
+
 // Print a rst format string which contains all Presto/Spark scalar
 // functions and aggragate functions. This function will read
 // all_scalar_functions.txt and all_aggregate_functions.txt from certain path.
@@ -27,6 +33,10 @@ namespace facebook::velox::functions {
 // for Spark, path is velox/functions/sparksql/coverage/data/
 // domain is like a namespace. for spark function, domain is ":spark".
 void printCoverageMapForAll(const std::string& domain = "");
+
+// Prints a rst format string which contains all Presto functions supported by
+// Velox along with their function signatures.
+void printCoverageMapWithSignatures();
 
 // Print a rst format string which contains Presto/Spark functions were
 // supported by velox. domain is like a namespace. for spark function, domain

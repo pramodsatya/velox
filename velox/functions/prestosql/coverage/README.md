@@ -11,6 +11,12 @@ Velox documentation.
 Generates a list of Presto functions available in Velox. The output
 to be copy-pasted into velox/docs/functions.rst file.
 
+> velox_prestosql_coverage --signatures
+
+Generates a list of Presto functions available in Velox along with the supported
+signatures for each function. The output to be copy-pasted into 
+velox/docs/functions_with_signatures.rst file.
+
 > velox_prestosql_coverage --all
 
 Generates coverage map using all Presto functions. The output to be copy-pasted
