@@ -203,7 +203,10 @@ VELOX_DECLARE_VECTOR_FUNCTION(
 VELOX_DECLARE_VECTOR_FUNCTION_WITH_METADATA(
     udf_vector_func_four,
     VectorFuncFour::signatures(),
-    exec::VectorFunctionMetadataBuilder().deterministic(false).build(),
+    exec::VectorFunctionMetadataBuilder()
+        .deterministic(false)
+        .defaultNullBehavior(false)
+        .build(),
     std::make_unique<VectorFuncFour>());
 
 inline void registerTestFunctions() {
@@ -612,7 +615,7 @@ TEST_F(FunctionRegistryTest, resolveWithMetadata) {
       "vector_func_four", {MAP(INTEGER(), VARCHAR())});
   EXPECT_TRUE(result.has_value());
   EXPECT_EQ(*result->first, *ARRAY(INTEGER()));
-  EXPECT_TRUE(result->second.defaultNullBehavior);
+  EXPECT_FALSE(result->second.defaultNullBehavior);
   EXPECT_FALSE(result->second.deterministic);
   EXPECT_FALSE(result->second.supportsFlattening);
 
@@ -640,4 +643,24 @@ TEST_F(FunctionRegistryOverwriteTest, overwrite) {
   ASSERT_EQ(signatures.size(), 1);
 }
 
+TEST_F(FunctionRegistryTest, functionMetadata) {
+  auto checkMetadata = [&](StringView functionName,
+                           bool expectedDeterminism,
+                           bool expectedDefaultNullBehavior) {
+    auto metadata = getFunctionMetadata(functionName);
+    EXPECT_TRUE(metadata.has_value());
+    ASSERT_EQ(metadata.value().deterministic, expectedDeterminism);
+    ASSERT_EQ(
+        metadata.value().defaultNullBehavior, expectedDefaultNullBehavior);
+  };
+
+  // Validate VectorFunctionMetadata for simple functions func_one and func_two.
+  checkMetadata("func_one", false, true);
+  checkMetadata("func_two", true, false);
+
+  // Validate VectorFunctionMetadata for vector functions vector_func_three and
+  // vector_func_four.
+  checkMetadata("vector_func_three", true, true);
+  checkMetadata("vector_func_four", false, false);
+}
 } // namespace facebook::velox

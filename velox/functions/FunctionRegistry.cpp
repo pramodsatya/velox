@@ -141,4 +141,96 @@ resolveVectorFunctionWithMetadata(
   return exec::resolveVectorFunctionWithMetadata(functionName, argTypes);
 }
 
+bool isCompanionFunctionName(
+    const std::string& name,
+    const std::unordered_map<std::string, exec::AggregateFunctionEntry>&
+        aggregateFunctions) {
+  auto suffixOffset = name.rfind("_partial");
+  if (suffixOffset == std::string::npos) {
+    suffixOffset = name.rfind("_merge_extract");
+  }
+  if (suffixOffset == std::string::npos) {
+    suffixOffset = name.rfind("_merge");
+  }
+  if (suffixOffset == std::string::npos) {
+    suffixOffset = name.rfind("_extract");
+  }
+  if (suffixOffset == std::string::npos) {
+    return false;
+  }
+  return aggregateFunctions.count(name.substr(0, suffixOffset)) > 0;
+}
+
+std::vector<std::string> getSortedScalarNames() {
+  // Do not print "internal" functions.
+  static const std::unordered_set<std::string> kBlockList = {
+      "row_constructor", "in", "is_null"};
+
+  auto functions = getFunctionSignatures();
+
+  std::vector<std::string> names;
+  names.reserve(functions.size());
+  exec::aggregateFunctions().withRLock([&](const auto& aggregateFunctions) {
+    for (const auto& func : functions) {
+      const auto& name = func.first;
+      if (!isCompanionFunctionName(name, aggregateFunctions) &&
+          kBlockList.count(name) == 0) {
+        names.emplace_back(name);
+      }
+    }
+  });
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+std::vector<std::string> getSortedAggregateNames() {
+  std::vector<std::string> names;
+  exec::aggregateFunctions().withRLock([&](const auto& functions) {
+    names.reserve(functions.size());
+    for (const auto& entry : functions) {
+      if (!isCompanionFunctionName(entry.first, functions)) {
+        names.push_back(entry.first);
+      }
+    }
+  });
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+std::vector<std::string> getSortedWindowNames() {
+  const auto& functions = exec::windowFunctions();
+
+  std::vector<std::string> names;
+  names.reserve(functions.size());
+  exec::aggregateFunctions().withRLock([&](const auto& aggregateFunctions) {
+    for (const auto& entry : functions) {
+      if (!isCompanionFunctionName(entry.first, aggregateFunctions) &&
+          aggregateFunctions.count(entry.first) == 0) {
+        names.emplace_back(entry.first);
+      }
+    }
+  });
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+std::optional<exec::VectorFunctionMetadata> getFunctionMetadata(
+    const std::string& functionName) {
+  auto simpleFunctionMetadata =
+      exec::simpleFunctions().getFunctionSignaturesAndMetadata(functionName);
+  if (simpleFunctionMetadata.size()) {
+    // Functions like abs are registered as simple functions for primitive
+    // types, and as a vector function for complex types like DECIMAL. So do not
+    // throw an error if function metadata is not found in simple function
+    // signature map.
+    return simpleFunctionMetadata.back().first;
+  }
+
+  auto vectorFunctionMetadata = exec::getVectorFunctionMetadata(functionName);
+  if (vectorFunctionMetadata.has_value()) {
+    return vectorFunctionMetadata.value();
+  }
+  return std::nullopt;
+}
+
 } // namespace facebook::velox

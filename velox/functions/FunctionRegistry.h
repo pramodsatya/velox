@@ -18,6 +18,8 @@
 #include <string>
 #include <vector>
 
+#include "velox/exec/Aggregate.h"
+#include "velox/exec/WindowFunction.h"
 #include "velox/expression/FunctionMetadata.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/type/Type.h"
@@ -88,5 +90,25 @@ resolveVectorFunctionWithMetadata(
 
 /// Clears the function registry.
 void clearFunctionRegistry();
+
+/// A function name is a companion function's if the name is an existing
+/// aggregation function name followed by a specific suffixes.
+bool isCompanionFunctionName(
+    const std::string& name,
+    const std::unordered_map<std::string, exec::AggregateFunctionEntry>&
+        aggregateFunctions);
+
+/// Returns sorted list of scalar function names available in Velox.
+std::vector<std::string> getSortedScalarNames();
+
+/// Returns sorted list of aggregate function names available in Velox.
+std::vector<std::string> getSortedAggregateNames();
+
+/// Returns sorted list of window function names available in Velox.
+std::vector<std::string> getSortedWindowNames();
+
+/// Get the function metadata corresponding to functionName.
+std::optional<exec::VectorFunctionMetadata> getFunctionMetadata(
+    const std::string& functionName);
 
 } // namespace facebook::velox
