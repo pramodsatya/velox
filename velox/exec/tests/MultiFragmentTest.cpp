@@ -28,6 +28,7 @@
 #include "velox/exec/tests/utils/HiveConnectorTestBase.h"
 #include "velox/exec/tests/utils/LocalExchangeSource.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/exec/tests/utils/SerializedPageUtil.h"
 
 using namespace facebook::velox::exec::test;
 
@@ -147,23 +148,11 @@ class MultiFragmentTest : public HiveConnectorTestBase {
     createDuckDbTable(vectors_);
   }
 
-  std::unique_ptr<SerializedPage> toSerializedPage(const RowVectorPtr& vector) {
-    auto data = std::make_unique<VectorStreamGroup>(pool());
-    auto size = vector->size();
-    auto range = IndexRange{0, size};
-    data->createStreamTree(asRowType(vector->type()), size);
-    data->append(vector, folly::Range(&range, 1));
-    auto listener = bufferManager_->newListener();
-    IOBufOutputStream stream(*pool(), listener.get(), data->size());
-    data->flush(&stream);
-    return std::make_unique<SerializedPage>(stream.getIOBuf(), nullptr, size);
-  }
-
   int32_t enqueue(
       const std::string& taskId,
       int32_t destination,
       const RowVectorPtr& data) {
-    auto page = toSerializedPage(data);
+    auto page = toSerializedPage(data, pool(), bufferManager_);
     const auto pageSize = page->size();
 
     ContinueFuture unused;

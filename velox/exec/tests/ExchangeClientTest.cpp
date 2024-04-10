@@ -20,6 +20,7 @@
 #include "velox/exec/Task.h"
 #include "velox/exec/tests/utils/LocalExchangeSource.h"
 #include "velox/exec/tests/utils/PlanBuilder.h"
+#include "velox/exec/tests/utils/SerializedPageUtil.h"
 #include "velox/serializers/PrestoSerializer.h"
 #include "velox/vector/tests/utils/VectorTestBase.h"
 
@@ -45,18 +46,6 @@ class ExchangeClientTest : public testing::Test,
     bufferManager_ = OutputBufferManager::getInstance().lock();
   }
 
-  std::unique_ptr<SerializedPage> toSerializedPage(const RowVectorPtr& vector) {
-    auto data = std::make_unique<VectorStreamGroup>(pool());
-    auto size = vector->size();
-    auto range = IndexRange{0, size};
-    data->createStreamTree(asRowType(vector->type()), size);
-    data->append(vector, folly::Range(&range, 1));
-    auto listener = bufferManager_->newListener();
-    IOBufOutputStream stream(*pool(), listener.get(), data->size());
-    data->flush(&stream);
-    return std::make_unique<SerializedPage>(stream.getIOBuf(), nullptr, size);
-  }
-
   std::shared_ptr<Task> makeTask(
       const std::string& taskId,
       const core::PlanNodePtr& planNode) {
@@ -71,7 +60,7 @@ class ExchangeClientTest : public testing::Test,
       const std::string& taskId,
       int32_t destination,
       const RowVectorPtr& data) {
-    auto page = toSerializedPage(data);
+    auto page = test::toSerializedPage(data, pool(), bufferManager_);
     const auto pageSize = page->size();
     ContinueFuture unused;
     auto blocked =
@@ -208,7 +197,7 @@ TEST_F(ExchangeClientTest, flowControl) {
       makeFlatVector<int64_t>(10'000, [](auto row) { return row; }),
   });
 
-  auto page = toSerializedPage(data);
+  auto page = test::toSerializedPage(data, pool(), bufferManager_);
 
   // Set limit at 3.5 pages.
   auto client = std::make_shared<ExchangeClient>(
