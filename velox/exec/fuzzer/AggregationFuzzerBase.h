@@ -189,7 +189,9 @@ class AggregationFuzzerBase {
   std::vector<std::string> generateSortingKeys(
       const std::string& prefix,
       std::vector<std::string>& names,
-      std::vector<TypePtr>& types);
+      std::vector<TypePtr>& types,
+      const bool hasRowNumberKey = true,
+      const bool isKRangeFrame = false);
 
   std::pair<CallableSignature, SignatureStats&> pickSignature();
 
@@ -202,11 +204,12 @@ class AggregationFuzzerBase {
   // child named "row_number" of BIGINT row numbers that differentiates every
   // row. Row numbers start from 0. This additional input vector is needed for
   // result verification of window aggregations.
-  std::vector<RowVectorPtr> generateInputDataWithRowNumber(
+  std::vector<RowVectorPtr> generateInputDataForWindowFuzzer(
       std::vector<std::string> names,
       std::vector<TypePtr> types,
       const std::vector<std::string>& partitionKeys,
-      const CallableSignature& signature);
+      const CallableSignature& signature,
+      const bool hasRowNumberKey = true);
 
   std::pair<std::optional<MaterializedRowMultiset>, ReferenceQueryErrorCode>
   computeReferenceResults(

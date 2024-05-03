@@ -33,6 +33,23 @@ enum UTF8CharList {
   MATHEMATICAL_SYMBOLS = 3 // Mathematical Symbols.
 };
 
+// @TODO Add decimal TypeKinds to randType.
+// Refer https://github.com/facebookincubator/velox/issues/3942
+static std::vector<TypePtr> kScalarTypes{
+    BOOLEAN(),
+    TINYINT(),
+    SMALLINT(),
+    INTEGER(),
+    BIGINT(),
+    REAL(),
+    DOUBLE(),
+    VARCHAR(),
+    VARBINARY(),
+    TIMESTAMP(),
+    DATE(),
+    INTERVAL_DAY_TIME(),
+};
+
 /// VectorFuzzer is a helper class that generates randomized vectors and their
 /// data for testing, with a high degree of entropy.
 ///
@@ -258,7 +275,9 @@ class VectorFuzzer {
 
   /// Same as the function above, but only generate orderable types.
   /// MAP types are not generated as they are not orderable.
-  TypePtr randOrderableType(int maxDepth = 5);
+  TypePtr randOrderableType(
+      int maxDepth = 5,
+      std::vector<TypePtr> possibleScalarTypes = kScalarTypes);
 
   TypePtr randType(const std::vector<TypePtr>& scalarTypes, int maxDepth = 5);
   RowTypePtr randRowType(int maxDepth = 5);
@@ -364,7 +383,10 @@ TypePtr randType(FuzzerGenerator& rng, int maxDepth = 5);
 
 /// Same as the function above, but only generate orderable types.
 /// MAP types are not generated as they are not orderable.
-TypePtr randOrderableType(FuzzerGenerator& rng, int maxDepth = 5);
+TypePtr randOrderableType(
+    FuzzerGenerator& rng,
+    int maxDepth = 5,
+    std::vector<TypePtr> possibleScalarTypes = kScalarTypes);
 
 TypePtr randType(
     FuzzerGenerator& rng,

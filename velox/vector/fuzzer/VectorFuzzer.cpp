@@ -817,8 +817,10 @@ TypePtr VectorFuzzer::randType(int maxDepth) {
   return velox::randType(rng_, maxDepth);
 }
 
-TypePtr VectorFuzzer::randOrderableType(int maxDepth) {
-  return velox::randOrderableType(rng_, maxDepth);
+TypePtr VectorFuzzer::randOrderableType(
+    int maxDepth,
+    std::vector<TypePtr> possibleScalarTypes) {
+  return velox::randOrderableType(rng_, maxDepth, possibleScalarTypes);
 }
 
 TypePtr VectorFuzzer::randType(
@@ -1019,34 +1021,14 @@ VectorPtr VectorLoaderWrap::makeEncodingPreservedCopy(
       std::move(nulls), std::move(indices), vectorSize, baseResult);
 }
 
-namespace {
-
-const std::vector<TypePtr> defaultScalarTypes() {
-  // @TODO Add decimal TypeKinds to randType.
-  // Refer https://github.com/facebookincubator/velox/issues/3942
-  static std::vector<TypePtr> kScalarTypes{
-      BOOLEAN(),
-      TINYINT(),
-      SMALLINT(),
-      INTEGER(),
-      BIGINT(),
-      REAL(),
-      DOUBLE(),
-      VARCHAR(),
-      VARBINARY(),
-      TIMESTAMP(),
-      DATE(),
-      INTERVAL_DAY_TIME(),
-  };
-  return kScalarTypes;
-}
-} // namespace
-
 TypePtr randType(FuzzerGenerator& rng, int maxDepth) {
-  return randType(rng, defaultScalarTypes(), maxDepth);
+  return randType(rng, kScalarTypes, maxDepth);
 }
 
-TypePtr randOrderableType(FuzzerGenerator& rng, int maxDepth) {
+TypePtr randOrderableType(
+    FuzzerGenerator& rng,
+    int maxDepth,
+    std::vector<TypePtr> possibleScalarTypes) {
   // Should we generate a scalar type?
   if (maxDepth <= 1 || rand<bool>(rng)) {
     return randType(rng, 0);
@@ -1089,7 +1071,7 @@ TypePtr randType(
 }
 
 RowTypePtr randRowType(FuzzerGenerator& rng, int maxDepth) {
-  return randRowType(rng, defaultScalarTypes(), maxDepth);
+  return randRowType(rng, kScalarTypes, maxDepth);
 }
 
 RowTypePtr randRowType(
