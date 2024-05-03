@@ -399,13 +399,10 @@ std::optional<std::string> PrestoQueryRunner::toSql(
   return sql.str();
 }
 
-namespace {
-
-void appendWindowFrame(
+void PrestoQueryRunner::appendWindowFrame(
     const core::WindowNode::Frame& frame,
-    std::stringstream& sql) {
-  // TODO: Add support for k Range Frames by retrieving the original range bound
-  // from WindowNode.
+    std::stringstream& sql,
+    const core::PlanNodeId& planNodeId) {
   switch (frame.type) {
     case core::WindowNode::WindowType::kRange:
       sql << " RANGE";
@@ -418,9 +415,10 @@ void appendWindowFrame(
   }
   sql << " BETWEEN";
 
-  auto appendBound = [&sql](
+  auto appendBound = [&sql, &frame, &planNodeId, this](
                          const core::WindowNode::BoundType& bound,
-                         const core::TypedExprPtr& value) {
+                         const core::TypedExprPtr& value,
+                         const bool isStartBound) {
     switch (bound) {
       case core::WindowNode::BoundType::kUnboundedPreceding:
         sql << " UNBOUNDED PRECEDING";
@@ -432,22 +430,44 @@ void appendWindowFrame(
         sql << " CURRENT ROW";
         break;
       case core::WindowNode::BoundType::kPreceding:
-        sql << " " << value->toString() << " PRECEDING";
+        if (frame.type == core::WindowNode::WindowType::kRange) {
+          if (isStartBound) {
+            sql << " "
+                << queryRunnerContext_->windowFrames_.at(planNodeId)[0].first
+                << " PRECEDING";
+          } else {
+            sql << " "
+                << queryRunnerContext_->windowFrames_.at(planNodeId)[0].second
+                << " PRECEDING";
+          }
+        } else {
+          sql << " " << value->toString() << " PRECEDING";
+        }
         break;
       case core::WindowNode::BoundType::kFollowing:
-        sql << " " << value->toString() << " FOLLOWING";
+        if (frame.type == core::WindowNode::WindowType::kRange) {
+          if (isStartBound) {
+            sql << " "
+                << queryRunnerContext_->windowFrames_.at(planNodeId)[0].first
+                << " FOLLOWING";
+          } else {
+            sql << " "
+                << queryRunnerContext_->windowFrames_.at(planNodeId)[0].second
+                << " FOLLOWING";
+          }
+        } else {
+          sql << " " << value->toString() << " FOLLOWING";
+        }
         break;
       default:
         VELOX_UNREACHABLE();
     }
   };
 
-  appendBound(frame.startType, frame.startValue);
+  appendBound(frame.startType, frame.startValue, true);
   sql << " AND";
-  appendBound(frame.endType, frame.endValue);
+  appendBound(frame.endType, frame.endValue, false);
 }
-
-} // namespace
 
 std::optional<std::string> PrestoQueryRunner::toSql(
     const std::shared_ptr<const core::WindowNode>& windowNode) {
@@ -493,7 +513,7 @@ std::optional<std::string> PrestoQueryRunner::toSql(
       }
     }
 
-    appendWindowFrame(functions[i].frame, sql);
+    appendWindowFrame(functions[i].frame, sql, windowNode->id());
     sql << ")";
   }
 

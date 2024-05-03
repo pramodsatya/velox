@@ -711,16 +711,16 @@ std::string MaterializedRowEpsilonComparator::getUserFriendlyDiff(
          actualIndex < actualSorted_.size()) {
     const auto& expectedRow = expectedSorted_[expectedIndex];
     const auto& actualRow = actualSorted_[actualIndex];
-    if (equalWithEpsilon(expectedRow, actualRow)) {
-      ++expectedIndex;
-      ++actualIndex;
-    } else if (lessThanWithEpsilon(expectedRow, actualRow)) {
+//    if (equalWithEpsilon(expectedRow, actualRow)) {
+//      ++expectedIndex;
+//      ++actualIndex;
+//    } else if (lessThanWithEpsilon(expectedRow, actualRow)) {
       missingRows.push_back(expectedRow);
       ++expectedIndex;
-    } else {
+//    } else {
       extraRows.push_back(actualRow);
       ++actualIndex;
-    }
+//    }
   }
   for (; actualIndex < actualSorted_.size(); ++actualIndex) {
     extraRows.push_back(actualSorted_[actualIndex]);
@@ -841,20 +841,26 @@ std::string generateUserFriendlyDiff(
     const MaterializedRowMultiset& actualRows,
     const TypePtr& type) {
   std::vector<MaterializedRow> extraRows;
-  std::set_difference(
-      actualRows.begin(),
-      actualRows.end(),
-      expectedRows.begin(),
-      expectedRows.end(),
-      std::inserter(extraRows, extraRows.end()));
+//  std::set_difference(
+//      actualRows.begin(),
+//      actualRows.end(),
+//      expectedRows.begin(),
+//      expectedRows.end(),
+//      std::inserter(extraRows, extraRows.end()));
+  for (auto ele: actualRows) {
+    extraRows.push_back(ele);
+  }
 
   std::vector<MaterializedRow> missingRows;
-  std::set_difference(
-      expectedRows.begin(),
-      expectedRows.end(),
-      actualRows.begin(),
-      actualRows.end(),
-      std::inserter(missingRows, missingRows.end()));
+//  std::set_difference(
+//      expectedRows.begin(),
+//      expectedRows.end(),
+//      actualRows.begin(),
+//      actualRows.end(),
+//      std::inserter(missingRows, missingRows.end()));
+  for (auto ele: expectedRows) {
+    missingRows.push_back(ele);
+  }
 
   return makeErrorMessage(
       missingRows, extraRows, expectedRows.size(), actualRows.size(), type);

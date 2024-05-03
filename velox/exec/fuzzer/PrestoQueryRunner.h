@@ -103,6 +103,11 @@ class PrestoQueryRunner : public velox::exec::test::ReferenceQueryRunner {
 
   std::string fetchNext(const std::string& nextUri);
 
+  void appendWindowFrame(
+      const core::WindowNode::Frame& frame,
+      std::stringstream& sql,
+      const core::PlanNodeId& planNodeId);
+
   const std::string coordinatorUri_;
   const std::string user_;
   const std::chrono::milliseconds timeout_;

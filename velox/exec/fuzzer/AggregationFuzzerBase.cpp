@@ -42,7 +42,7 @@ DEFINE_int32(
     100,
     "The number of elements on each generated vector.");
 
-DEFINE_int32(num_batches, 10, "The number of generated vectors.");
+DEFINE_int32(num_batches, 1, "The number of generated vectors.");
 
 DEFINE_int32(
     max_num_varargs,
@@ -237,15 +237,32 @@ std::vector<std::string> AggregationFuzzerBase::generateKeys(
 std::vector<std::string> AggregationFuzzerBase::generateSortingKeys(
     const std::string& prefix,
     std::vector<std::string>& names,
-    std::vector<TypePtr>& types) {
+    std::vector<TypePtr>& types,
+    const bool isKRangeFrame) {
   std::vector<std::string> keys;
-  auto numKeys = boost::random::uniform_int_distribution<uint32_t>(1, 5)(rng_);
+  vector_size_t numKeys;
+  TypePtr type;
+  if (isKRangeFrame) {
+    // If frame is k-range frame, sorting keys size should be 1 only
+    numKeys = 1;
+    type = vectorFuzzer_.randOrderableType(0);
+    // Pick scalar type which supports '+', '-' binary operations.
+    while (type == TIMESTAMP() || type == VARCHAR() || type == UNKNOWN() ||
+           type == VARBINARY() || type == BOOLEAN()) {
+      type = vectorFuzzer_.randOrderableType(0);
+    }
+  } else {
+    // Pick random, possibly complex, type.
+    numKeys = boost::random::uniform_int_distribution<uint32_t>(1, 5)(rng_);
+    type = vectorFuzzer_.randOrderableType(2);
+  }
+
   for (auto i = 0; i < numKeys; ++i) {
     keys.push_back(fmt::format("{}{}", prefix, i));
-
-    // Pick random, possibly complex, type.
-    types.push_back(vectorFuzzer_.randOrderableType(2));
+    types.push_back(type);
     names.push_back(keys.back());
+
+    type = vectorFuzzer_.randOrderableType(2);
   }
 
   return keys;
@@ -300,16 +317,36 @@ std::vector<RowVectorPtr> AggregationFuzzerBase::generateInputData(
 std::vector<RowVectorPtr> AggregationFuzzerBase::generateInputDataWithRowNumber(
     std::vector<std::string> names,
     std::vector<TypePtr> types,
-    const CallableSignature& signature) {
+    const std::vector<std::string>& partitionKeys,
+    const CallableSignature& signature,
+    std::string orderByKey) {
   names.push_back("row_number");
   types.push_back(BIGINT());
 
   auto generator = findInputGenerator(signature);
 
   std::vector<RowVectorPtr> input;
-  auto size = vectorFuzzer_.getOptions().vectorSize;
   velox::test::VectorMaker vectorMaker{pool_.get()};
   int64_t rowNumber = 0;
+  VectorFuzzer::Options opts = vectorFuzzer_.getOptions();
+  VectorFuzzer::Options oldOpts = opts;
+  opts.nullRatio = 0;
+  opts.vectorSize = 10;
+  vectorFuzzer_.setOptions(opts);
+
+  vector_size_t size = vectorFuzzer_.getOptions().vectorSize;
+
+  std::unordered_set<std::string> partitionKeySet;
+  partitionKeySet.reserve(partitionKeys.size());
+  for (auto partitionKey : partitionKeys) {
+    partitionKeySet.insert(partitionKey);
+  }
+  // Set the maximum number of partitions possible to 10 when 10 < size < 100,
+  // and ensure that it increases linearly with size when size > 100. When
+  // size < 10, limit the maximum number of partitions possible to size + 1.
+  vector_size_t maxPartitions =
+      std::min(size + 1, std::max(static_cast<vector_size_t>(size / 10), 10));
+
   for (auto j = 0; j < FLAGS_num_batches; ++j) {
     std::vector<VectorPtr> children;
 
@@ -318,8 +355,24 @@ std::vector<RowVectorPtr> AggregationFuzzerBase::generateInputDataWithRowNumber(
           generator->generate(signature.args, vectorFuzzer_, rng_, pool_.get());
     }
 
+    // Randomly generate the number of partitions
+    auto numPartitions = 1;
+    auto indices = vectorFuzzer_.fuzzIndices(size, numPartitions);
+    auto nulls = vectorFuzzer_.fuzzNulls(size);
     for (auto i = children.size(); i < types.size() - 1; ++i) {
-      children.push_back(vectorFuzzer_.fuzz(types[i], size));
+      if (partitionKeySet.find(names[i]) != partitionKeySet.end()) {
+        // The partition keys are built with a dictionary over a smaller set of
+        // values. This is done to introduce some repetition of key values for
+        // windowing.
+        auto baseVector = vectorFuzzer_.fuzz(types[i], numPartitions);
+        children.push_back(
+            BaseVector::wrapInDictionary(nulls, indices, size, baseVector));
+      } else if (names[i] == orderByKey) {
+        // fuzzFlat the order by column for k Range bound frames.
+        children.push_back(vectorFuzzer_.fuzzFlat(types[i], size));
+      } else {
+        children.push_back(vectorFuzzer_.fuzz(types[i], size));
+      }
     }
     children.push_back(vectorMaker.flatVector<int64_t>(
         size, [&](auto /*row*/) { return rowNumber++; }));
@@ -761,11 +814,14 @@ std::unique_ptr<ReferenceQueryRunner> setupReferenceQueryRunner(
     LOG(INFO) << "Using DuckDB as the reference DB.";
     return duckQueryRunner;
   } else {
-    return std::make_unique<PrestoQueryRunner>(
+    auto prestoQueryRunner = std::make_unique<PrestoQueryRunner>(
         prestoUrl,
         runnerName,
         static_cast<std::chrono::milliseconds>(reqTimeoutMs));
+    prestoQueryRunner->queryRunnerContext_ =
+        std::make_shared<QueryRunnerContext>();
     LOG(INFO) << "Using Presto as the reference DB.";
+    return prestoQueryRunner;
   }
 }
 

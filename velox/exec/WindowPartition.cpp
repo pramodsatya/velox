@@ -289,7 +289,7 @@ void WindowPartition::updateKRangeFrameBounds(
         start = currentRow;
         end = partition_.size();
       }
-      rawFrameBounds[i] = searchFrameValue(
+      auto x = searchFrameValue(
           firstMatch,
           start,
           end,
@@ -297,6 +297,7 @@ void WindowPartition::updateKRangeFrameBounds(
           orderByColumn,
           inputMapping_[frameColumn],
           flags);
+      rawFrameBounds[i] = x;
     }
   }
 }
