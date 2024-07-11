@@ -17,6 +17,7 @@
 #pragma once
 
 #include <folly/Singleton.h>
+#include <folly/futures/Future.h>
 #include <memory>
 
 /// StatsReporter designed to assist in reporting various metrics of the
@@ -127,13 +128,17 @@ class BaseStatsReporter {
       const = 0;
 
   /// Add the given value to the histogram.
-  virtual void addHistogramMetricValue(const std::string& key, size_t value)
-      const = 0;
+  virtual folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      const std::string& key,
+      size_t value) const = 0;
 
-  virtual void addHistogramMetricValue(const char* key, size_t value) const = 0;
+  virtual folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      const char* key,
+      size_t value) const = 0;
 
-  virtual void addHistogramMetricValue(folly::StringPiece key, size_t value)
-      const = 0;
+  virtual folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      folly::StringPiece key,
+      size_t value) const = 0;
 
   /// Return the aggregated metrics in a serialized string format.
   virtual std::string fetchMetrics() = 0;
@@ -174,14 +179,23 @@ class DummyStatsReporter : public BaseStatsReporter {
   void addMetricValue(folly::StringPiece /* key */, size_t /* value */)
       const override {}
 
-  void addHistogramMetricValue(const std::string& /* key */, size_t /* value */)
-      const override {}
+  folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      const std::string& /* key */,
+      size_t /* value */) const override {
+    return folly::makeSemiFuture();
+  }
 
-  void addHistogramMetricValue(const char* /* key */, size_t /* value */)
-      const override {}
+  folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      const char* /* key */,
+      size_t /* value */) const override {
+    return folly::makeSemiFuture();
+  }
 
-  void addHistogramMetricValue(folly::StringPiece /* key */, size_t /* value */)
-      const override {}
+  folly::SemiFuture<folly::Unit> addHistogramMetricValue(
+      folly::StringPiece /* key */,
+      size_t /* value */) const override {
+    return folly::makeSemiFuture();
+  }
 
   std::string fetchMetrics() override {
     return "";
@@ -210,30 +224,44 @@ class DummyStatsReporter : public BaseStatsReporter {
     }                                                          \
   }
 
-#define DEFINE_HISTOGRAM_METRIC(key, bucket, min, max, ...)    \
-  {                                                            \
-    if (::facebook::velox::BaseStatsReporter::registered) {    \
-      auto reporter = folly::Singleton<                        \
-          facebook::velox::BaseStatsReporter>::try_get_fast(); \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                 \
-        reporter->registerHistogramMetricExportType(           \
-            (key),                                             \
-            (bucket),                                          \
-            (min),                                             \
-            (max),                                             \
-            (std::vector<int32_t>({__VA_ARGS__})));            \
-      }                                                        \
-    }                                                          \
+#define DEFINE_HISTOGRAM_METRIC(key, bucket, min, max, ...)              \
+  {                                                                      \
+    if (::facebook::velox::BaseStatsReporter::registered) {              \
+      auto reporter = folly::Singleton<                                  \
+          facebook::velox::BaseStatsReporter>::try_get_fast();           \
+      if (FOLLY_LIKELY(reporter != nullptr)) {                           \
+        std::chrono::steady_clock::time_point start =                    \
+            std::chrono::steady_clock::now();                            \
+        reporter->registerHistogramMetricExportType(                     \
+            (key),                                                       \
+            (bucket),                                                    \
+            (min),                                                       \
+            (max),                                                       \
+            (std::vector<int32_t>({__VA_ARGS__})));                      \
+        uint64_t timeTaken =                                             \
+            std::chrono::duration_cast<std::chrono::microseconds>(       \
+                std::chrono::steady_clock::now() - start)                \
+                .count();                                                \
+        VLOG(1) << "<=>Reg<=>" << __func__ << "<=>time<=>" << timeTaken; \
+      }                                                                  \
+    }                                                                    \
   }
 
-#define RECORD_HISTOGRAM_METRIC_VALUE(key, ...)                  \
-  {                                                              \
-    if (::facebook::velox::BaseStatsReporter::registered) {      \
-      auto reporter = folly::Singleton<                          \
-          facebook::velox::BaseStatsReporter>::try_get_fast();   \
-      if (FOLLY_LIKELY(reporter != nullptr)) {                   \
-        reporter->addHistogramMetricValue((key), ##__VA_ARGS__); \
-      }                                                          \
-    }                                                            \
+#define RECORD_HISTOGRAM_METRIC_VALUE(key, ...)                          \
+  {                                                                      \
+    if (::facebook::velox::BaseStatsReporter::registered) {              \
+      auto reporter = folly::Singleton<                                  \
+          facebook::velox::BaseStatsReporter>::try_get_fast();           \
+      if (FOLLY_LIKELY(reporter != nullptr)) {                           \
+        std::chrono::steady_clock::time_point start =                    \
+            std::chrono::steady_clock::now();                            \
+        reporter->addHistogramMetricValue(key, ##__VA_ARGS__);           \
+        uint64_t timeTaken =                                             \
+            std::chrono::duration_cast<std::chrono::microseconds>(       \
+                std::chrono::steady_clock::now() - start)                \
+                .count();                                                \
+        VLOG(1) << "<=>Add<=>" << __func__ << "<=>time<=>" << timeTaken; \
+      }                                                                  \
+    }                                                                    \
   }
 } // namespace facebook::velox
