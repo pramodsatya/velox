@@ -423,6 +423,11 @@ class QueryConfig {
   static constexpr const char* kSelectiveNimbleReaderEnabled =
       "selective_nimble_reader_enabled";
 
+  /// Indicates whether legacy map subscript should be used. When set to true,
+  /// the subscript function does not fail when map key is missing and returns
+  /// NULL instead. When set to false, the subscript function throws an error.
+  static constexpr const char* kLegacyMapSubscript = "legacy_map_subscript";
+
   bool selectiveNimbleReaderEnabled() const {
     return get<bool>(kSelectiveNimbleReaderEnabled, false);
   }
@@ -794,6 +799,10 @@ class QueryConfig {
 
   int32_t prefixSortMinRows() const {
     return get<int32_t>(kPrefixSortMinRows, 130);
+  }
+
+  bool isLegacyMapSubscript() const {
+    return get<bool>(kLegacyMapSubscript, false);
   }
 
   template <typename T>

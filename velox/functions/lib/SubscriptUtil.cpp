@@ -103,6 +103,7 @@ VectorPtr applyMapTyped(
 
   auto rawSizes = baseMap->rawSizes();
   auto rawOffsets = baseMap->rawOffsets();
+  auto isLegacyMapSubscript = context.execCtx()->queryCtx()->queryConfig().isLegacyMapSubscript();
 
   // Lambda that does the search for a key, for each row.
   auto processRow = [&](vector_size_t row, TKey searchKey) {
@@ -148,7 +149,15 @@ VectorPtr applyMapTyped(
 
     // Handle NULLs.
     if (!found) {
-      nullsBuilder.setNull(row);
+      if (isLegacyMapSubscript) {
+        nullsBuilder.setNull(row);
+      } else {
+        if constexpr (kind == TypeKind::TIMESTAMP) {
+          VELOX_USER_FAIL("Key not present in map: ", static_cast<Timestamp>(searchKey).toString());
+        } else {
+          VELOX_USER_FAIL("Key not present in map: ", searchKey);
+        }
+      }
     }
   };
 
@@ -217,6 +226,7 @@ VectorPtr applyMapComplexType(
 
   auto rawSizes = baseMap->rawSizes();
   auto rawOffsets = baseMap->rawOffsets();
+  auto isLegacyMapSubscript = context.execCtx()->queryCtx()->queryConfig().isLegacyMapSubscript();
 
   // Fast path for the case of a single map. It may be constant or dictionary
   // encoded. Use hash table for quick search.
@@ -259,7 +269,11 @@ VectorPtr applyMapComplexType(
       if (it != hashMapPtr->end()) {
         rawIndices[row] = it->index;
       } else {
-        nullsBuilder.setNull(row);
+        if (isLegacyMapSubscript) {
+          nullsBuilder.setNull(row);
+        } else {
+          VELOX_USER_FAIL("Key not present in map");
+        }
       }
     });
 
@@ -282,7 +296,11 @@ VectorPtr applyMapComplexType(
       }
 
       if (!found) {
-        nullsBuilder.setNull(row);
+        if (isLegacyMapSubscript) {
+          nullsBuilder.setNull(row);
+        } else {
+          VELOX_USER_FAIL("Key not present in map");
+        }
       }
     });
   }
