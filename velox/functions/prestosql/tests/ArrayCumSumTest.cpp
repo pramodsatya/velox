@@ -116,6 +116,22 @@ TEST_F(ArrayCumSumTest, double) {
   testArrayCumSum<double>(expected, input);
 }
 
+TEST_F(ArrayCumSumTest, decimal) {
+  auto input = makeNullableArrayVector<int64_t>(
+      {{},
+       {10000, 1000010000, 100001000010000},
+       {-976543210987654321, std::nullopt, std::numeric_limits<int64_t>::max()},
+       {std::nullopt, 100001000010000}},
+      DECIMAL(10, 2));
+  auto expected = makeNullableArrayVector<int64_t>(
+      {{},
+       {10000, 1000020000, 100002000030000},
+       {-976543210987654321, std::nullopt, std::nullopt},
+       {std::nullopt, std::nullopt}},
+      DECIMAL(10, 2));
+  testArrayCumSum<int64_t>(expected, input);
+}
+
 TEST_F(ArrayCumSumTest, bigintOverflow) {
   constexpr int64_t kMin = std::numeric_limits<int64_t>::min();
   constexpr int64_t kMax = std::numeric_limits<int64_t>::max();

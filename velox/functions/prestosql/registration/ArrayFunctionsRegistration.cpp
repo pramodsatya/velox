@@ -64,6 +64,30 @@ template <typename T>
 inline void registerArrayCumSumFunction(const std::string& prefix) {
   registerFunction<ParameterBinder<ArrayCumSumFunction, T>, Array<T>, Array<T>>(
       {prefix + "array_cum_sum"});
+//  if constexpr (std::is_same_v<T, int128_t>) {
+//    registerFunction<ParameterBinder<ArrayCumSumFunction, LongDecimal<P1, S1>>,
+//                     Array<LongDecimal<P1, S1>>,
+//                     Array<LongDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+//  } else if constexpr (std::is_same_v<T, int64_t>) {
+//    registerFunction<ParameterBinder<ArrayCumSumFunction, ShortDecimal<P1, S1>>,
+//                     Array<ShortDecimal<P1, S1>>,
+//                     Array<ShortDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+//  }
+}
+
+template <typename T,
+          typename std::enable_if_t<
+              std::is_same_v<T, int64_t> || std::is_same_v<T, int128_t>>>
+inline void registerArrayCumSumFunctionDecimal(const std::string& prefix) {
+  if constexpr (std::is_same_v<T, int128_t>) {
+    registerFunction<ArrayCumSumFunctionDecimal,
+        Array<LongDecimal<P1, S1>>,
+        Array<LongDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+  } else {
+    registerFunction<ArrayCumSumFunctionDecimal,
+        Array<ShortDecimal<P1, S1>>,
+        Array<ShortDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+  }
 }
 
 template <typename T>
@@ -291,6 +315,16 @@ void registerArrayFunctions(const std::string& prefix) {
   registerArrayCumSumFunction<int128_t>(prefix);
   registerArrayCumSumFunction<float>(prefix);
   registerArrayCumSumFunction<double>(prefix);
+  registerArrayCumSumFunctionDecimal<int128_t>(prefix);
+  registerArrayCumSumFunctionDecimal<int64_t>(prefix);
+//  registerFunction<ArrayCumSumFunctionDecimal,
+//                   Array<LongDecimal<P1, S1>>,
+//                   Array<LongDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+//  registerFunction<ParameterBinder<ArrayCumSumFunctionDecimal, ShortDecimal<P1, S1>>,
+//                   Array<ShortDecimal<P1, S1>>,
+//                   Array<ShortDecimal<P1, S1>>>({prefix + "array_cum_sum"});
+//  registerArrayCumSumFunctionDecimal<ShortDecimal<P1, S1>>(prefix);
+//  registerArrayCumSumFunctionDecimal<int128_t>(prefix);
 
   registerArrayHasDuplicatesFunctions<int8_t>(prefix);
   registerArrayHasDuplicatesFunctions<int16_t>(prefix);

@@ -438,7 +438,7 @@ struct ArraySumFunction {
 
 template <typename TExecCtx, typename T>
 struct ArrayCumSumFunction {
-  VELOX_DEFINE_FUNCTION_TYPES(TExecCtx)
+  VELOX_DEFINE_FUNCTION_TYPES(TExecCtx);
 
   FOLLY_ALWAYS_INLINE void call(
       out_type<velox::Array<T>>& out,
@@ -476,6 +476,36 @@ struct ArrayCumSumFunction {
         sum = checkedPlus<T>(sum, item);
       }
       out.add_item() = sum;
+    }
+    return;
+  }
+};
+
+template <typename T>
+struct ArrayCumSumFunctionDecimal {
+  VELOX_DEFINE_FUNCTION_TYPES(T);
+
+  void initialize(
+      const std::vector<TypePtr>& inputTypes,
+      const core::QueryConfig& /*config*/,
+      const arg_type<velox::Array<T>>* /*a*/) {}
+
+  void call(
+      out_type<velox::Array<T>>& out,
+      const arg_type<velox::Array<T>>* in) {
+    T sum = 0;
+    auto len = in->size();
+
+    for (auto i = 0; i < len; ++i) {
+      if (in[i] == nullptr) {
+        sum = checkedPlus<T>(sum, in[i].value());
+        out.add_item() = sum;
+      } else {
+        for (auto j = i; j < len; ++j) {
+          out.add_null();
+        }
+        break;
+      }
     }
     return;
   }
