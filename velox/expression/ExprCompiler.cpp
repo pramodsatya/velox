@@ -168,7 +168,8 @@ ExprPtr compileExpression(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding);
+    bool enableConstantFolding,
+    bool ignoreConstantFoldError = true);
 
 std::vector<ExprPtr> compileInputs(
     const TypedExprPtr& expr,
@@ -299,7 +300,10 @@ std::shared_ptr<Expr> compileLambda(
       config.exprTrackCpuUsage());
 }
 
-ExprPtr tryFoldIfConstant(const ExprPtr& expr, Scope* scope) {
+ExprPtr tryFoldIfConstant(
+    const ExprPtr& expr,
+    Scope* scope,
+    bool ignoreConstantFoldError) {
   if (expr->isConstant() && scope->exprSet->execCtx()) {
     try {
       auto rowType = ROW({}, {});
@@ -324,18 +328,22 @@ ExprPtr tryFoldIfConstant(const ExprPtr& expr, Scope* scope) {
       }
       return resultExpr;
     }
-    // Constant folding has a subtle gotcha: if folding a constant expression
-    // deterministically throws, we can't throw at expression compilation time
-    // yet because we can't guarantee that this expression would actually need
-    // to be evaluated.
-    //
-    // So, here, if folding an expression throws an exception, we just ignore it
-    // and leave the expression as-is. If this expression is hit at execution
-    // time and needs to be evaluated, it will throw and fail the query anyway.
-    // If not, in case this expression is never hit at execution time (for
-    // instance, if other arguments are all null in a function with default null
-    // behavior), the query won't fail.
     catch (const VeloxUserError&) {
+      if (!ignoreConstantFoldError) {
+        // TODO: Map errors to different error codes as per StandardErrorCode
+        // in presto-spi.
+        int errorCode = 8;
+        std::string errorMessage = "ignore failure message";
+        auto failTypedExpr = std::make_shared<core::CallTypedExpr>(
+            UNKNOWN(),
+            std::vector<core::TypedExprPtr>{
+                std::make_shared<core::ConstantTypedExpr>(INTEGER(), errorCode),
+                std::make_shared<core::ConstantTypedExpr>(
+                    VARCHAR(), errorMessage)},
+            "fail");
+        auto failExprSet = ExprSet({failTypedExpr}, scope->exprSet->execCtx());
+        return failExprSet.exprs().front();
+      }
     }
   }
   return expr;
@@ -372,7 +380,8 @@ ExprPtr compileRewrittenExpression(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding) {
+    bool enableConstantFolding,
+    bool ignoreConstantFoldError) {
   ExprPtr alreadyCompiled = getAlreadyCompiled(expr.get(), &scope->visited);
   if (alreadyCompiled) {
     if (!alreadyCompiled->isMultiplyReferenced()) {
@@ -522,7 +531,7 @@ ExprPtr compileRewrittenExpression(
 
   // If the expression is constant folding it is redundant.
   auto folded = enableConstantFolding && !isConstantExpr
-      ? tryFoldIfConstant(result, scope)
+      ? tryFoldIfConstant(result, scope, ignoreConstantFoldError)
       : result;
   scope->visited[expr.get()] = folded;
   return folded;
@@ -534,7 +543,8 @@ ExprPtr compileExpression(
     const core::QueryConfig& config,
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
-    bool enableConstantFolding) {
+    bool enableConstantFolding,
+    bool ignoreConstantFoldError) {
   auto rewritten = rewriteExpression(expr);
   if (rewritten.get() != expr.get()) {
     scope->rewrittenExpressions.push_back(rewritten);
@@ -545,7 +555,8 @@ ExprPtr compileExpression(
       config,
       pool,
       flatteningCandidates,
-      enableConstantFolding);
+      enableConstantFolding,
+      ignoreConstantFoldError);
 }
 
 /// Walk expression tree and collect names of functions used in CallTypedExpr
@@ -590,7 +601,8 @@ std::vector<std::shared_ptr<Expr>> compileExpressions(
     const std::vector<TypedExprPtr>& sources,
     core::ExecCtx* execCtx,
     ExprSet* exprSet,
-    bool enableConstantFolding) {
+    bool enableConstantFolding,
+    bool ignoreConstantFoldError) {
   Scope scope({}, nullptr, exprSet);
   std::vector<std::shared_ptr<Expr>> exprs;
   exprs.reserve(sources.size());
@@ -606,7 +618,8 @@ std::vector<std::shared_ptr<Expr>> compileExpressions(
         execCtx->queryCtx()->queryConfig(),
         execCtx->pool(),
         flatteningCandidates,
-        enableConstantFolding));
+        enableConstantFolding,
+        ignoreConstantFoldError));
   }
   return exprs;
 }

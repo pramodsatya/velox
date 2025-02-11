@@ -702,12 +702,30 @@ using ExprPtr = std::shared_ptr<Expr>;
 // this ExprSet. If however such an association cannot be made with certainty,
 // then its advisable to pre-load all lazy vectors to avoid issues associated
 // with partial loading.
+//
+// The input typed expressions are compiled in the constructor to exec::Expr
+// using the helper function compileExpressions. Constant folding is enabled by
+// default during expression compilation and it can be disabled by setting the
+// argument enableConstantFolding to false. Constant folding has a subtle
+// gotcha: if folding a constant expression deterministically throws, we can't
+// throw at expression compilation time yet because we can't guarantee that this
+// expression would actually need to be evaluated.
+//
+// If folding an expression throws an exception, the user can choose whether to
+// just ignore it or receive a FailFunction in place of the expression by
+// setting argument ignoreConstantFoldError to either true or false
+// respectively. By default, we just ignore such exceptions and leave the
+// expression as-is. If this expression is hit at execution time and needs to be
+// evaluated, it will throw and fail the query anyway. If not, in case this
+// expression is never hit at execution time (for instance, if other arguments
+// are all null in a function with default null behavior), the query won't fail.
 class ExprSet {
  public:
   explicit ExprSet(
       const std::vector<core::TypedExprPtr>& source,
       core::ExecCtx* execCtx,
-      bool enableConstantFolding = true);
+      bool enableConstantFolding = true,
+      bool ignoreConstantFoldError = true);
 
   virtual ~ExprSet();
 

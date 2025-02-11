@@ -1753,9 +1753,11 @@ std::vector<common::Subfield> Expr::extractSubfields() const {
 ExprSet::ExprSet(
     const std::vector<core::TypedExprPtr>& sources,
     core::ExecCtx* execCtx,
-    bool enableConstantFolding)
+    bool enableConstantFolding,
+    bool ignoreConstantFoldError)
     : execCtx_(execCtx) {
-  exprs_ = compileExpressions(sources, execCtx, this, enableConstantFolding);
+  exprs_ = compileExpressions(
+      sources, execCtx, this, enableConstantFolding, ignoreConstantFoldError);
   std::vector<FieldReference*> allDistinctFields;
   for (auto& expr : exprs_) {
     Expr::mergeFields(
