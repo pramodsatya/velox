@@ -841,6 +841,7 @@ void Expr::evaluateSharedSubexpr(
     EvalCtx& context,
     VectorPtr& result,
     TEval eval) {
+  LOG(ERROR) << "Evaluating CSE " << this->toString();
   // Captures the inputs referenced by distinctFields_.
   InputForSharedResults expressionInputFields;
   for (auto* field : distinctFields_) {

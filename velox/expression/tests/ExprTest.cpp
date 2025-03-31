@@ -429,6 +429,56 @@ class ParameterizedExprTest : public ExprTest,
   }
 };
 
+TEST_P(ParameterizedExprTest, cseAtCompile) {
+  auto compiled = compileMultiple(
+      {"if (c0 > 0 AND c2 = 'apple', 10, 3)",
+       "if (c1 > 0 AND c2 = 'apple', 20, 5)"},
+      ROW({"c0", "c1", "c2"}, {INTEGER(), INTEGER(), VARCHAR()}));
+  for (const auto& expr: compiled->exprs()) {
+    ASSERT_FALSE(expr->isMultiplyReferenced());
+  }
+  ASSERT_TRUE(compiled->exprs().at(0)->inputs().at(0)->inputs().at(1)->isMultiplyReferenced());
+
+  compiled = compileMultiple(
+      {"if (a = 0, 0, 100 / a)",
+       "if (a = 0 OR b = 0, 0, 100 / b + 100 / a)"},
+      ROW({"a", "b"}, {INTEGER(), INTEGER()}));
+  for (const auto& expr: compiled->exprs()) {
+    ASSERT_FALSE(expr->isMultiplyReferenced());
+  }
+  ASSERT_TRUE(compiled->exprs().at(0)->inputs().at(2)->isMultiplyReferenced());
+
+  compiled = compileMultiple(
+      {"if (c0 = 'apple', c0 = 'apple', c0 = 'apple')",
+       "if (c0 = 'apple', c0 = 'apple', c0 = 'apple')"},
+      ROW({"c0"}, {VARCHAR()}));
+  for (const auto& expr: compiled->exprs()) {
+    ASSERT_TRUE(expr->isMultiplyReferenced());
+    for (const auto& exprInput: expr->inputs()) {
+      ASSERT_TRUE(exprInput->isMultiplyReferenced());
+    }
+  }
+}
+
+TEST_P(ParameterizedExprTest, cseAtEval) {
+  auto size = 2;
+  auto a = makeFlatVector<int32_t>(size, [](auto row) { return row + 1; });
+  auto indices = makeIndices(size, [](auto row) { return row % 2; });
+  auto b = wrapInDictionary(indices, 2, makeFlatVector<int32_t>({11, 15}));
+  auto c = wrapInDictionary(
+      indices, 2, makeFlatVector<std::string>({"apple", "banana"}));
+
+  auto results = evaluateMultiple(
+      {"if (c0 > 0 AND c2 = 'apple', 10, 3)",
+       "if (c1 > 0 AND c2 = 'apple', 20, 5)"},
+      makeRowVector({a, b, c}));
+
+  results = evaluateMultiple(
+      {"if (c0 = 'apple', c0 = 'apple', c0 = 'apple')",
+       "if (c0 = 'apple', c0 = 'apple', c0 = 'apple')"},
+      makeRowVector({c}));
+}
+
 TEST_P(ParameterizedExprTest, moreEncodings) {
   const vector_size_t size = 1'000;
   std::vector<std::string> fruits = {"apple", "pear", "grapes", "pineapple"};

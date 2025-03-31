@@ -591,6 +591,7 @@ std::vector<std::shared_ptr<Expr>> compileExpressions(
     core::ExecCtx* execCtx,
     ExprSet* exprSet,
     bool enableConstantFolding) {
+  LOG(ERROR) << "Compiling expressions";
   Scope scope({}, nullptr, exprSet);
   std::vector<std::shared_ptr<Expr>> exprs;
   exprs.reserve(sources.size());
