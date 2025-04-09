@@ -23,6 +23,7 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/connectors/hive/HiveConnector.h"
+#include "velox/core/ExpressionOptimizer.h"
 #include "velox/dwio/dwrf/RegisterDwrfWriter.h"
 #include "velox/exec/fuzzer/FuzzerUtil.h"
 #include "velox/expression/Expr.h"
@@ -398,6 +399,13 @@ void ExpressionFuzzerVerifier::go() {
     // for floating-point columns and make investigation of failures easier.
     expressions.push_back(
         std::make_shared<core::FieldAccessTypedExpr>(BIGINT(), "row_number"));
+
+    if (options_.expressionFuzzerOptions.enableExpressionOptimizer) {
+      for (auto& expression : expressions) {
+        expression =
+            core::optimizeExpression(expression, queryCtx_, pool_.get());
+      }
+    }
 
     for (auto& [funcName, count] : selectionStats) {
       exprNameToStats_[funcName].numTimesSelected += count;

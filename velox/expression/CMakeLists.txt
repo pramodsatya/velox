@@ -63,6 +63,11 @@ velox_link_libraries(
   double-conversion::double-conversion
   Folly::folly)
 
+velox_add_library(velox_expression_optimizer ExpressionOptimizer.cpp)
+
+velox_link_libraries(velox_expression_optimizer velox_common_config velox_type
+        velox_vector)
+
 add_subdirectory(type_calculation)
 add_subdirectory(signature_parser)
 
