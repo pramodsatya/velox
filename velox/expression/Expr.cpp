@@ -2018,11 +2018,12 @@ core::ExecCtx* SimpleExpressionEvaluator::ensureExecCtx() {
 
 VectorPtr evaluateConstantExpression(
     const core::TypedExprPtr& expr,
-    memory::MemoryPool* pool) {
+    memory::MemoryPool* pool,
+    std::shared_ptr<core::QueryCtx> queryCtx = nullptr) {
   auto data = BaseVector::create<RowVector>(ROW({}), 1, pool);
 
-  auto queryCtx = velox::core::QueryCtx::create();
-  velox::core::ExecCtx execCtx{pool, queryCtx.get()};
+  auto queryContext = queryCtx ? queryCtx : velox::core::QueryCtx::create();
+  velox::core::ExecCtx execCtx{pool, queryContext.get()};
   velox::exec::ExprSet exprSet({expr}, &execCtx);
   velox::exec::EvalCtx evalCtx(&execCtx, &exprSet, data.get());
 
