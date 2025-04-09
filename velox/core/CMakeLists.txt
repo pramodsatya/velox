@@ -39,3 +39,8 @@ velox_link_libraries(
          Folly::folly
          fmt::fmt
   PRIVATE velox_encode)
+
+velox_add_library(velox_expression_optimizer ExpressionOptimizer.cpp)
+
+velox_link_libraries(velox_expression_optimizer velox_common_config velox_type
+                     velox_vector)

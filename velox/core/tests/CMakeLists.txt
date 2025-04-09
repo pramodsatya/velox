@@ -20,7 +20,8 @@ add_executable(
   QueryConfigTest.cpp
   StringTest.cpp
   TypeAnalysisTest.cpp
-  TypedExprSerdeTest.cpp)
+  TypedExprSerdeTest.cpp
+  ExpressionOptimizerTest.cpp)
 
 add_test(velox_core_test velox_core_test)
 
@@ -30,6 +31,7 @@ target_link_libraries(
     velox_core
     velox_exception
     velox_exec_test_lib
+    velox_expression_optimizer
     velox_presto_types
     velox_type
     velox_vector_test_lib
