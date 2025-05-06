@@ -23,10 +23,11 @@
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/file/FileSystems.h"
 #include "velox/connectors/hive/HiveConnector.h"
-#include "velox/core/ExpressionOptimizer.h"
 #include "velox/dwio/dwrf/RegisterDwrfWriter.h"
 #include "velox/exec/fuzzer/FuzzerUtil.h"
 #include "velox/expression/Expr.h"
+#include "velox/expression/ExprCompiler.h"
+#include "velox/expression/ExpressionOptimizer.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/expression/ReverseSignatureBinder.h"
 #include "velox/expression/fuzzer/ExpressionFuzzer.h"
@@ -402,8 +403,10 @@ void ExpressionFuzzerVerifier::go() {
 
     if (options_.expressionFuzzerOptions.enableExpressionOptimizer) {
       for (auto& expression : expressions) {
-        expression =
-            core::optimizeExpression(expression, queryCtx_, pool_.get());
+        auto rewritten = exec::rewriteExpression(
+            expression, queryCtx_->queryConfig(), pool_.get());
+        expression = expression::constantFold(
+            rewritten, queryCtx_->queryConfig(), pool_.get());
       }
     }
 

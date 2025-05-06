@@ -840,8 +840,8 @@ std::unique_ptr<ExprSet> makeExprSetFromFlag(
 /// result as single-row vector.
 VectorPtr evaluateConstantExpression(
     const core::TypedExprPtr& expr,
-    memory::MemoryPool* pool,
-    const std::shared_ptr<core::QueryCtx>& queryCtx = nullptr);
+    const core::QueryConfig& config,
+    memory::MemoryPool* pool);
 
 /// Returns a string representation of the expression trees annotated with
 /// runtime statistics. Expected to be called after calling ExprSet::eval one or

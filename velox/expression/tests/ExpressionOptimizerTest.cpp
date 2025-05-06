@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "velox/core/ExpressionOptimizer.h"
+#include "velox/expression/ExpressionOptimizer.h"
+#include "velox/expression/ExprCompiler.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/parse/Expressions.h"
 #include "velox/parse/ExpressionsParser.h"
@@ -22,7 +23,7 @@
 
 #include <gtest/gtest.h>
 
-namespace facebook::velox::core::test {
+namespace facebook::velox::expression::test {
 
 class ExpressionOptimizerTest : public testing::Test,
                                 public velox::test::VectorTestBase {
@@ -33,7 +34,7 @@ class ExpressionOptimizerTest : public testing::Test,
 
   void SetUp() override {
     functions::prestosql::registerAllScalarFunctions("");
-    registerExpressionOptimizations();
+    expression::registerExpressionOptimizations();
     parse::registerTypeResolver();
   }
 
@@ -44,15 +45,21 @@ class ExpressionOptimizerTest : public testing::Test,
     return core::Expressions::inferTypes(untyped, type, execCtx_->pool());
   }
 
+  core::TypedExprPtr optimizeExpression(
+      const core::TypedExprPtr& expr,
+      const core::QueryConfig& config,
+      memory::MemoryPool* pool) {
+    auto optimized = exec::rewriteExpression(expr, config, pool);
+    return expression::constantFold(optimized, config, pool);
+  }
+
   void testExpression(
-      const std::string& input,
-      const std::string& expected,
-      const RowTypePtr& inputType = ROW({}),
-      const RowTypePtr& expectedType = ROW({})) {
+      const core::TypedExprPtr& input,
+      const core::TypedExprPtr& expected) {
     auto optimizedInput =
-        optimizeExpression(makeTypedExpr(input, inputType), queryCtx_, pool());
-    auto optimizedExpected = optimizeExpression(
-        makeTypedExpr(expected, expectedType), queryCtx_, pool());
+        optimizeExpression(input, queryCtx_->queryConfig(), pool());
+    auto optimizedExpected =
+        optimizeExpression(expected, queryCtx_->queryConfig(), pool());
     // The constant value in ConstantTypedExpr can either be in valueVector_ or
     // in the variant value_. String comparison is used to compare the optimized
     // expressions, since ITypedExpr comparison with equality operator will fail
@@ -61,7 +68,23 @@ class ExpressionOptimizerTest : public testing::Test,
     ASSERT_EQ(optimizedInput->toString(), optimizedExpected->toString());
   }
 
-  std::shared_ptr<core::QueryCtx> queryCtx_{velox::core::QueryCtx::create()};
+  void testExpression(
+      const std::string& input,
+      const std::string& expected,
+      const RowTypePtr& inputType = ROW({}),
+      const RowTypePtr& expectedType = ROW({})) {
+    testExpression(
+        makeTypedExpr(input, inputType), makeTypedExpr(expected, expectedType));
+  }
+
+  void setQueryTimeZone(const std::string& timeZone) {
+    queryCtx_->testingOverrideConfigUnsafe({
+        {core::QueryConfig::kSessionTimezone, timeZone},
+        {core::QueryConfig::kAdjustTimestampToTimezone, "true"},
+    });
+  }
+
+  std::shared_ptr<core::QueryCtx> queryCtx_{core::QueryCtx::create()};
   std::unique_ptr<core::ExecCtx> execCtx_{
       std::make_unique<core::ExecCtx>(pool_.get(), queryCtx_.get())};
 };
@@ -198,11 +221,13 @@ TEST_F(ExpressionOptimizerTest, conjunct) {
 }
 
 TEST_F(ExpressionOptimizerTest, constantFolding) {
+  // BETWEEN.
   testExpression("3 between 2 and 4", "true");
   testExpression("2 between 3 and 4", "false");
   testExpression("'cc' between 'b' and 'd'", "true");
   testExpression("'b' between 'cc' and 'd'", "false");
 
+  // IN.
   testExpression("3 in (2, 4, 3, 5)", "true");
   testExpression("3 in (2, 4, 9, 5)", "false");
   testExpression("'foo' in ('bar', 'baz', 'foo', 'blah')", "true");
@@ -210,11 +235,19 @@ TEST_F(ExpressionOptimizerTest, constantFolding) {
   testExpression(
       "'foo' in ('bar', cast(null as varchar), 'foo', 'blah')", "true");
 
+  // CAST.
   testExpression("cast(BIGINT '123' as VARCHAR)", "123");
   testExpression("cast(12300000000 as VARCHAR)", "12300000000");
   testExpression("cast(-12300000000 as VARCHAR)", "-12300000000");
   testExpression("cast(123.456E0 as VARCHAR)", "123.456");
   testExpression("cast(-123.456E0 as VARCHAR)", "-123.456");
+
+  // Ensure session timezone from queryConfig is used.
+  setQueryTimeZone("Pacific/Apia");
+  testExpression("hour(from_unixtime(9.98489045321E8))", "3");
+
+  setQueryTimeZone("America/Los_Angeles");
+  testExpression("hour(from_unixtime(9.98489045321E8))", "7");
 }
 
-} // namespace facebook::velox::core::test
+} // namespace facebook::velox::expression::test

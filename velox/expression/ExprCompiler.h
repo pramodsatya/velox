@@ -25,6 +25,11 @@ namespace facebook::velox::exec {
 class Expr;
 class ExprSet;
 
+core::TypedExprPtr rewriteExpression(
+    const core::TypedExprPtr& expr,
+    const core::QueryConfig& config,
+    memory::MemoryPool* pool);
+
 std::vector<std::shared_ptr<Expr>> compileExpressions(
     const std::vector<core::TypedExprPtr>& sources,
     core::ExecCtx* execCtx,

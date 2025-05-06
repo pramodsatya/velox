@@ -276,7 +276,10 @@ bool registerStatefulVectorFunction(
 
 /// An expression re-writer that takes an expression and returns an equivalent
 /// expression or nullptr if re-write is not possible.
-using ExpressionRewrite = std::function<core::TypedExprPtr(core::TypedExprPtr)>;
+using ExpressionRewrite = std::function<core::TypedExprPtr(
+    const core::TypedExprPtr,
+    const core::QueryConfig&,
+    memory::MemoryPool*)>;
 
 /// Returns a list of registered re-writes.
 std::vector<ExpressionRewrite>& expressionRewrites();

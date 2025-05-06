@@ -357,15 +357,6 @@ std::vector<VectorPtr> getConstantInputs(const std::vector<ExprPtr>& exprs) {
   return constants;
 }
 
-core::TypedExprPtr rewriteExpression(const core::TypedExprPtr& expr) {
-  for (auto& rewrite : expressionRewrites()) {
-    if (auto rewritten = rewrite(expr)) {
-      return rewritten;
-    }
-  }
-  return expr;
-}
-
 ExprPtr compileRewrittenExpression(
     const TypedExprPtr& expr,
     Scope* scope,
@@ -535,7 +526,7 @@ ExprPtr compileExpression(
     memory::MemoryPool* pool,
     const std::unordered_set<std::string>& flatteningCandidates,
     bool enableConstantFolding) {
-  auto rewritten = rewriteExpression(expr);
+  auto rewritten = rewriteExpression(expr, config, pool);
   if (rewritten.get() != expr.get()) {
     scope->rewrittenExpressions.push_back(rewritten);
   }
@@ -585,6 +576,18 @@ std::unordered_set<std::string> collectFlatteningCandidates(
   });
 }
 } // namespace
+
+core::TypedExprPtr rewriteExpression(
+    const core::TypedExprPtr& expr,
+    const core::QueryConfig& config,
+    memory::MemoryPool* pool) {
+  for (auto& rewrite : expressionRewrites()) {
+    if (auto rewritten = rewrite(expr, config, pool)) {
+      return rewritten;
+    }
+  }
+  return expr;
+}
 
 std::vector<std::shared_ptr<Expr>> compileExpressions(
     const std::vector<TypedExprPtr>& sources,

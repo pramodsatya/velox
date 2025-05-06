@@ -20,25 +20,15 @@
 #include "velox/core/Expressions.h"
 #include "velox/core/QueryCtx.h"
 
-namespace facebook::velox::core {
+namespace facebook::velox::expression {
 
-using ExpressionOptimization = std::function<core::TypedExprPtr(
-    const core::TypedExprPtr,
-    const std::shared_ptr<core::QueryCtx>,
-    memory::MemoryPool*)>;
+/// Register expression optimizations for AND, OR, IF, COALESCE.
+void registerExpressionOptimizations();
 
-/// Returns all registered expression optimizations.
-std::vector<ExpressionOptimization>& getExpressionOptimizations();
-
-/// Register expression optimizations for AND, OR, IF, COALESCE. Register
-/// additional expression optimizations from arguments if specified.
-void registerExpressionOptimizations(
-    const std::vector<ExpressionOptimization>& customOptimizations = {});
-
-/// Apply registered expression optimizations and constant fold subtrees of the
-/// input expression. Return the optimized expression.
-TypedExprPtr optimizeExpression(
+/// Constant fold subtrees of the input expression and return the folded
+/// expression.
+core::TypedExprPtr constantFold(
     const core::TypedExprPtr& expr,
-    const std::shared_ptr<core::QueryCtx>& queryCtx,
+    const core::QueryConfig& config,
     memory::MemoryPool* pool);
-} // namespace facebook::velox::core
+} // namespace facebook::velox::expression

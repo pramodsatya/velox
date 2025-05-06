@@ -26,7 +26,7 @@ add_executable(
   ExprStatsTest.cpp
   ExprTest.cpp
   ExprToSubfieldFilterTest.cpp
-        ExpressionOptimizerTest.cpp
+  ExpressionOptimizerTest.cpp
   EvalCtxTest.cpp
   EvalErrorsTest.cpp
   EvalSimplifiedTest.cpp
@@ -63,7 +63,6 @@ target_link_libraries(
   velox_dwio_common_exception
   velox_exec_test_lib
   velox_expression
-        velox_expression_optimizer
   velox_expression_test_utility
   velox_functions_lib
   velox_functions_prestosql
