@@ -25,6 +25,7 @@
 #include "velox/common/testutil/TestValue.h"
 #include "velox/external/tzdb/tzdb_list.h"
 #include "velox/external/tzdb/zoned_time.h"
+#include "velox/functions/prestosql/types/TimestampWithTimeZoneType.h"
 #include "velox/type/tz/TimeZoneNames.h"
 
 using facebook::velox::common::testutil::TestValue;
@@ -409,6 +410,22 @@ const TimeZone* locateZone(std::string_view timeZone, bool failOnError) {
 int16_t getTimeZoneID(std::string_view timeZone, bool failOnError) {
   const TimeZone* tz = locateZone(timeZone, failOnError);
   return tz == nullptr ? -1 : tz->id();
+}
+
+TimeZoneKey getTimeZoneID(int64_t offsetMinutes)
+{
+  if (offsetMinutes == 0) {
+    return UTC_KEY;
+  }
+
+  if (!(offsetMinutes >= OFFSET_TIME_ZONE_MIN && offsetMinutes <= OFFSET_TIME_ZONE_MAX)) {
+    throw new InvalidFunctionArgumentException(format("Invalid offset minutes %s", offsetMinutes));
+  }
+  TimeZoneKey timeZoneKey = OFFSET_TIME_ZONE_KEYS[((int) offsetMinutes) - OFFSET_TIME_ZONE_MIN];
+  if (timeZoneKey == null) {
+    throw new TimeZoneNotSupportedException(zoneIdForOffset(offsetMinutes));
+  }
+  return timeZoneKey;
 }
 
 int16_t getTimeZoneID(int32_t offsetMinutes) {

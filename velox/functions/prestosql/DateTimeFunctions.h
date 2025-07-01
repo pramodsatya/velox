@@ -1684,6 +1684,19 @@ struct AtTimezoneFunction : public TimestampWithTimezoneSupport<T> {
     }
   }
 
+  FOLLY_ALWAYS_INLINE void initialize(
+      const std::vector<TypePtr>& /*inputTypes*/,
+      const core::QueryConfig& config,
+      const arg_type<TimestampWithTimezone>* /*tsWithTz*/,
+      const arg_type<IntervalDayTime>* timezoneOffset) {
+    if (timezoneOffset) {
+      VELOX_USER_CHECK(timezoneOffset % kMillisInMinute == 0, "Invalid time zone offset interval: interval contains seconds");
+      const auto timezone = Timestamp::fromMillisNoError(timezoneOffset);
+      targetTimezoneID_ = tz::getTimeZoneID(
+          std::string_view(timezone->data(), timezone->size()));
+    }
+  }
+
   FOLLY_ALWAYS_INLINE void call(
       out_type<TimestampWithTimezone>& result,
       const arg_type<TimestampWithTimezone>& tsWithTz,
@@ -1698,6 +1711,27 @@ struct AtTimezoneFunction : public TimestampWithTimezoneSupport<T> {
     // two, as timestamp is stored as a UTC offset. The timestamp is then
     // resolved to the respective timezone at the time of display.
     result = pack(inputMs, targetTimezoneID);
+  }
+
+  FOLLY_ALWAYS_INLINE void call(
+      out_type<TimestampWithTimezone>& result,
+      const arg_type<TimestampWithTimezone>& tsWithTz,
+      const arg_type<IntervalDayTime>& timezoneOffset) {
+    const auto inputMs = unpackMillisUtc(*tsWithTz);
+
+    if (targetTimezoneID_.has_value()) {
+      result = pack(inputMs, targetTimezoneID_);
+    } else {
+      VELOX_USER_CHECK(
+          timezoneOffset % kMillisInMinute == 0,
+          "Invalid time zone offset interval: interval contains seconds");
+      int64_t timezoneOffsetMinutes = timezoneOffset / kMillisInMinute;
+      const auto timezone = Timestamp::fromMillisNoError(timezoneOffset);
+      tsWithTz.toTimezone(timezone);
+      const auto targetTimezoneID = tz::getTimeZoneID(
+          std::string_view(timezone->data(), timezone->size()));
+      result = pack(inputMs, targetTimezoneID);
+    }
   }
 };
 
