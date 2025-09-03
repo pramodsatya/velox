@@ -15,9 +15,27 @@
  */
 #pragma once
 
-#include "velox/expression/Expr.h"
+#include "velox/core/Expressions.h"
 
 namespace facebook::velox::expression::utils {
+
+/// Indicates the type of direct inputs for a node of type ITypedExpr in the
+/// expression tree.
+enum class ExprInputsKind {
+  /// All inputs are constant.
+  kAllConstant = 0,
+  /// All inputs are field references.
+  kAllField,
+  /// Each input is either constant or field reference.
+  kConstantOrField,
+  /// kAny: At least one input is not a constant or field reference.
+  kAny
+};
+
+VELOX_DECLARE_ENUM_NAME(ExprInputsKind);
+
+/// Returns ExprInputsKind for an expression.
+ExprInputsKind getExprInputsKind(const core::TypedExprPtr& expr);
 
 /// Returns true if expr is of type CallTypedExpr and the expr name matches
 /// the passed name. Otherwise, returns false.
