@@ -49,4 +49,13 @@ bool allInputTypesEquivalent(const core::TypedExprPtr& expr) {
   return true;
 }
 
+bool allConstantExpr(const std::vector<core::TypedExprPtr>& exprs) {
+  for (const auto& expr : exprs) {
+    if (!expr->isConstantKind()) {
+      return false;
+    }
+  }
+  return true;
+}
+
 } // namespace facebook::velox::expression::utils
