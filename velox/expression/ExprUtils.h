@@ -34,7 +34,19 @@ enum class ExprInputsKind {
 
 VELOX_DECLARE_ENUM_NAME(ExprInputsKind);
 
-/// Returns ExprInputsKind for an expression.
+/// Indicates the result of evaluating an expression to a boolean constant.
+enum class ConstantEvalResult {
+  kNotConstant = 0,
+  kNull,
+  kTrue,
+  kFalse,
+  kNonBoolConstant
+};
+
+/// Helper function to evaluate an expression to a boolean constant.
+ConstantEvalResult evalExprAsConstant(const core::TypedExprPtr& expr);
+
+/// Helper function to get ExprInputsKind for an expression.
 ExprInputsKind getExprInputsKind(const core::TypedExprPtr& expr);
 
 /// Returns true if expr is of type CallTypedExpr and the expr name matches
