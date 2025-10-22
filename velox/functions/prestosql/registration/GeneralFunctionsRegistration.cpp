@@ -100,7 +100,7 @@ void registerGeneralFunctions(const std::string& prefix) {
   registerFunction<CardinalityFunction, int64_t, Map<Generic<T1>, Generic<T2>>>(
       {prefix + "cardinality"});
 
-  registerFailFunction({prefix + "fail"});
+  registerFailFunction({prefix + expression::kFail});
 
   registerAllSpecialFormGeneralFunctions();
 }
