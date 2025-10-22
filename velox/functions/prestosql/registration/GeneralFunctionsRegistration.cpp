@@ -81,6 +81,7 @@ void registerAllSpecialFormGeneralFunctions() {
       Variadic<Generic<T1>>>({"in"});
   VELOX_REGISTER_VECTOR_FUNCTION(udf_concat_row, expression::kRowConstructor);
   registerIsNullFunction("is_null");
+  registerFailFunction({expression::kFail});
 }
 
 void registerGeneralFunctions(const std::string& prefix) {
@@ -99,8 +100,6 @@ void registerGeneralFunctions(const std::string& prefix) {
       {prefix + "cardinality"});
   registerFunction<CardinalityFunction, int64_t, Map<Generic<T1>, Generic<T2>>>(
       {prefix + "cardinality"});
-
-  registerFailFunction({prefix + "fail"});
 
   registerAllSpecialFormGeneralFunctions();
 }
