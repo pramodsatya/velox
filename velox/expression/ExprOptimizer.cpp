@@ -25,19 +25,19 @@ namespace {
 
 // Tries constant folding expression with tryEvaluateConstantExpression API.
 // If constant folding throws VeloxUserError, returns original expression when
-// replaceEvalErrorWithFailExpr is false, otherwise returns a fail expression.
+// failResult is false, otherwise returns a fail expression.
 core::TypedExprPtr tryConstantFold(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
     memory::MemoryPool* pool,
-    bool replaceEvalErrorWithFailExpr) {
+    bool failResult) {
   try {
     if (auto results =
             exec::tryEvaluateConstantExpression(expr, pool, queryCtx, false)) {
       return std::make_shared<core::ConstantTypedExpr>(results);
     }
   } catch (VeloxUserError& e) {
-    if (replaceEvalErrorWithFailExpr) {
+    if (failResult) {
       const auto failExpr = std::make_shared<core::CallTypedExpr>(
           UNKNOWN(),
           expression::kFail,
@@ -56,13 +56,13 @@ core::TypedExprPtr optimizeInputs(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
     memory::MemoryPool* pool,
-    bool replaceEvalErrorWithFailExpr) {
+    bool failResult) {
   if (expr->isCallKind()) {
     std::vector<core::TypedExprPtr> optimizedInputs;
     optimizedInputs.reserve(expr->inputs().size());
     for (const auto& input : expr->inputs()) {
       optimizedInputs.push_back(
-          optimize(input, queryCtx, pool, replaceEvalErrorWithFailExpr));
+          optimize(input, queryCtx, pool, failResult));
     }
     const auto* callExpr = expr->asUnchecked<core::CallTypedExpr>();
 
@@ -72,7 +72,7 @@ core::TypedExprPtr optimizeInputs(
 
   if (expr->isCastKind()) {
     const auto optimizedInput = optimize(
-        expr->inputs().at(0), queryCtx, pool, replaceEvalErrorWithFailExpr);
+        expr->inputs().at(0), queryCtx, pool, failResult);
     const auto* castExpr = expr->asUnchecked<core::CastTypedExpr>();
     return std::make_shared<core::CastTypedExpr>(
         expr->type(), optimizedInput, castExpr->isTryCast());
@@ -81,7 +81,7 @@ core::TypedExprPtr optimizeInputs(
   if (expr->isLambdaKind()) {
     const auto* lambdaExpr = expr->asUnchecked<core::LambdaTypedExpr>();
     const auto foldedBody = optimize(
-        lambdaExpr->body(), queryCtx, pool, replaceEvalErrorWithFailExpr);
+        lambdaExpr->body(), queryCtx, pool, failResult);
     return std::make_shared<core::LambdaTypedExpr>(
         lambdaExpr->signature(), foldedBody);
   }
@@ -94,7 +94,7 @@ core::TypedExprPtr optimize(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
     memory::MemoryPool* pool,
-    bool replaceEvalErrorWithFailExpr) {
+    bool failResult) {
   // 1 -> 1, a -> a.
   if (expr->isConstantKind() || expr->isFieldAccessKind()) {
     return expr;
@@ -108,13 +108,13 @@ core::TypedExprPtr optimize(
   }
 
   auto result =
-      optimizeInputs(expr, queryCtx, pool, replaceEvalErrorWithFailExpr);
+      optimizeInputs(expr, queryCtx, pool, failResult);
   for (const auto& input : result->inputs()) {
     if (!input->isConstantKind()) {
       return ExprRewriteRegistry::instance().rewrite(result);
     }
   }
-  return tryConstantFold(result, queryCtx, pool, replaceEvalErrorWithFailExpr);
+  return tryConstantFold(result, queryCtx, pool, failResult);
 }
 
 } // namespace facebook::velox::expression

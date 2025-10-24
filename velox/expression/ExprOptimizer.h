@@ -23,14 +23,14 @@ namespace facebook::velox::expression {
 /// bottom up manner, then the folded expression is rewritten. If an exception
 /// (i.e VeloxUserError) is encountered during optimization of any subtree of
 /// the expression and:
-///  1. If 'replaceEvalErrorWithFailExpr' is 'true', the failing subexpression
-///     is replaced with a fail expression of UNKNOWN type and containing the
-///     error message from VeloxUserError.
-///  2. If 'replaceEvalErrorWithFailExpr' is 'false', the exception is ignored
-///     and the failing subexpression is left unchanged in the expression tree.
+///  1. If 'failResult' is 'true', the failing subexpression is replaced with a
+///     fail expression of UNKNOWN type and containing the error message from
+///     VeloxUserError, so evaluation of this expression will fail.
+///  2. If 'failResult' is 'false', the exception is ignored and the failing
+///     subexpression is left unchanged in the expression tree.
 core::TypedExprPtr optimize(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
     memory::MemoryPool* pool,
-    bool replaceEvalErrorWithFailExpr);
+    bool failResult);
 } // namespace facebook::velox::expression

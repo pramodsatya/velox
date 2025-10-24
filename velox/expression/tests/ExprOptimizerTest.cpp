@@ -71,31 +71,32 @@ class ExprOptimizerTest : public functions::test::FunctionBaseTest {
   /// types for lambda expressions in the input and expected expressions.
   /// @param input Input expression to be optimized.
   /// @param expected Expected expression after optimization.
-  /// @param type Type of input and expected expressions.
+  /// @param type Row type of 'input' and 'expected'.
+  /// @param lambdaInputTypes Input types for any lambda sub-expressions in .
   /// @param lambdaInputTypes Types of inputs to lambda expression that could be
   /// present in 'input'.
   /// @param expectedLambdaInputTypes Types of inputs to lambda expression that
   /// could be present in 'expected'.
+  /// @param error Expected error message upon evaluating 'input'.
   void testExpression(
-      const std::string& input,
+      const std::string& expression,
       const std::string& expected,
       const RowTypePtr& type = ROW({}),
       const std::vector<TypePtr>& lambdaInputTypes = {},
       const std::vector<TypePtr>& expectedLambdaInputTypes = {}) {
-    const auto expr = makeTypedExpr(input, type, lambdaInputTypes);
-    const auto expectedExpr =
+    const auto typedExpr = makeTypedExpr(expression, type, lambdaInputTypes);
+    const auto expectedTypedExpr =
         makeTypedExpr(expected, type, expectedLambdaInputTypes);
-    testExpression(expr, expectedExpr, type);
+    testExpression(typedExpr, expectedTypedExpr, type);
   }
 
   /// Validates that the subexpressions that throw an exception during
   /// optimization are replaced with a fail expression when optimize is called
-  /// with 'replaceEvalErrorWithFailExpr = true'. Also validates that the
+  /// with 'failResult = true'. Also validates that the
   /// optimized expression containing fail expression(s) will throw the expected
   /// error upon evaluation.
   /// @param input Input expression to be optimized.
   /// @param expected Expected expression as a string.
-  /// @param error Expected error message upon evaluating input expression.
   /// @param type Type of input expression.
   /// @param lambdaInputTypes Types of inputs to lambda expression that could be
   /// present in 'input'.
@@ -118,11 +119,16 @@ class ExprOptimizerTest : public functions::test::FunctionBaseTest {
   }
 
  private:
+  /// Helper method to parse SQL expression into a typed expression tree using
+  /// DuckDB's SQL parser.
+  /// @param expression String representation of SQL expression to be parsed.
+  /// @param rowType Row type of 'expression'.
+  /// @param lambdaInputTypes Input types for any lambda sub-expressions.
   core::TypedExprPtr makeTypedExpr(
-      const std::string& text,
+      const std::string& expression,
       const RowTypePtr& rowType,
       const std::vector<TypePtr>& lambdaInputTypes) {
-    auto untyped = parse::parseExpr(text, options_);
+    auto untyped = parse::parseExpr(expression, options_);
     return core::Expressions::inferTypes(
         untyped, rowType, lambdaInputTypes, execCtx_->pool());
   }
