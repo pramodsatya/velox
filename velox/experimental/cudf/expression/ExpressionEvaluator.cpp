@@ -859,7 +859,7 @@ bool FunctionExpression::canEvaluate(const core::TypedExprPtr& expr) {
     return true;
   }
   if (expr->kind() != ExprKind::kCall) {
-    LOG_FALLBACK(core::ExprKindName::toName(expr->kind()));
+    //LOG_FALLBACK(core::ExprKindName::toName(expr->kind()));
     return false;
   }
   const auto* call = expr->asUnchecked<core::CallTypedExpr>();
