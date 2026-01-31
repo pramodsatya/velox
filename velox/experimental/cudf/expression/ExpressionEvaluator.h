@@ -83,6 +83,7 @@ class CudfExpression {
       std::vector<std::unique_ptr<cudf::column>>& inputTableColumns,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr,
+      vector_size_t inputRowCount,
       bool finalize = false) = 0;
 };
 
@@ -124,6 +125,7 @@ class FunctionExpression : public CudfExpression {
       std::vector<std::unique_ptr<cudf::column>>& inputTableColumns,
       rmm::cuda_stream_view stream,
       rmm::device_async_resource_ref mr,
+      vector_size_t inputRowCount,
       bool finalize = false) override;
 
   void close() override;

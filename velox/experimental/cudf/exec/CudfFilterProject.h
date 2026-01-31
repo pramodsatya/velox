@@ -83,6 +83,11 @@ class CudfFilterProject : public exec::Operator, public NvtxHelper {
 
   std::vector<velox::exec::IdentityProjection> resultProjections_;
   std::vector<velox::exec::IdentityProjection> identityProjections_;
+
+  // Tracks the row count of the current input batch for cases where there are
+  // no physical input columns (e.g., constant-only projections) but
+  // precompute instructions still need a row count to materialize outputs.
+  vector_size_t currentInputRowCount_{0};
 };
 
 } // namespace facebook::velox::cudf_velox

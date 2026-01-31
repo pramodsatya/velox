@@ -625,8 +625,13 @@ std::unique_ptr<cudf::table> CudfHashJoinProbe::filteredOutput(
   VELOX_CHECK_EQ(exprs.exprs().size(), 1);
   auto filterEvaluator = createCudfExpression(
       exprs.exprs()[0], facebook::velox::type::concatRowTypes(rowTypes));
-  auto filterColumns = filterEvaluator->eval(
-      joinedCols, stream, cudf::get_current_device_resource_ref());
+    const vector_size_t rowCount = leftResult->num_rows();
+    auto filterColumns = filterEvaluator->eval(
+      joinedCols,
+      stream,
+      cudf::get_current_device_resource_ref(),
+      rowCount,
+      /*finalize=*/true);
   auto filterColumn = asView(filterColumns);
 
   joinedCols = func(std::move(joinedCols), filterColumn);

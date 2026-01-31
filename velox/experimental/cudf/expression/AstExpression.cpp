@@ -313,6 +313,11 @@ cudf::ast::expression const& AstContext::pushExprToTree(
       // For literals, we use the first column just to get the size, but create
       // a new column The new column will be appended after the original input
       // columns
+      if (inputRowSchema[0]->size() == 0) {
+        // No input columns available; depend on a synthetic column index 0
+        // that will be materialized by the caller to provide the row count.
+        return addPrecomputeInstructionOnSide(0, 0, fillExpr, "");
+      }
       return addPrecomputeInstruction(inputRowSchema[0]->nameOf(0), fillExpr);
     }
 
@@ -460,7 +465,8 @@ std::vector<ColumnOrView> precomputeSubexpressions(
     const std::vector<PrecomputeInstruction>& precomputeInstructions,
     const std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
-    rmm::cuda_stream_view stream) {
+  vector_size_t inputRowCount,
+  rmm::cuda_stream_view stream) {
   std::vector<ColumnOrView> precomputedColumns;
   precomputedColumns.reserve(precomputeInstructions.size());
 
@@ -478,6 +484,7 @@ std::vector<ColumnOrView> precomputeSubexpressions(
           inputTableColumns,
           stream,
           cudf::get_current_device_resource_ref(),
+            inputRowCount,
           /*finalize=*/true);
       precomputedColumns.push_back(std::move(result));
       continue;
@@ -485,9 +492,12 @@ std::vector<ColumnOrView> precomputeSubexpressions(
     if (ins_name.rfind("fill", 0) == 0) {
       auto scalarIndex =
           std::stoi(ins_name.substr(5)); // "fill " is 5 characters
+      auto numRows = inputTableColumns.empty()
+        ? inputRowCount
+        : inputTableColumns[dependent_column_index]->size();
       auto newColumn = cudf::make_column_from_scalar(
           *static_cast<cudf::string_scalar*>(scalars[scalarIndex].get()),
-          inputTableColumns[dependent_column_index]->size(),
+        numRows,
           stream,
           cudf::get_current_device_resource_ref());
       precomputedColumns.push_back(std::move(newColumn));
@@ -554,12 +564,19 @@ ColumnOrView ASTExpression::eval(
     std::vector<std::unique_ptr<cudf::column>>& inputTableColumns,
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr,
+    vector_size_t inputRowCount,
     bool finalize) {
+  // Use the caller-provided row count when no physical columns are present.
+  const auto effectiveRowCount = inputTableColumns.empty()
+      ? inputRowCount
+      : inputTableColumns.front()->size();
+
   auto precomputedColumns = precomputeSubexpressions(
       inputTableColumns,
       precomputeInstructions_,
       scalars_,
       inputRowSchema_,
+      effectiveRowCount,
       stream);
 
   // Make table_view from input columns and precomputed columns

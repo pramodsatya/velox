@@ -259,10 +259,17 @@ std::optional<RowVectorPtr> CudfHiveDataSource::next(
     MicrosecondTimer filterTimer(&filterTimeUs);
     auto cudfTableColumns = cudfTable->release();
     const auto originalNumColumns = cudfTableColumns.size();
+    const vector_size_t originalNumRows = cudfTableColumns.empty()
+      ? 0
+      : cudfTableColumns.front()->size();
     // Filter may need addtional computed columns which are added to
     // cudfTableColumns
     auto filterResult = cudfExpressionEvaluator_->eval(
-        cudfTableColumns, stream_, cudf::get_current_device_resource_ref());
+      cudfTableColumns,
+      stream_,
+      cudf::get_current_device_resource_ref(),
+      originalNumRows,
+      /*finalize=*/true);
     // discard computed columns
     std::vector<std::unique_ptr<cudf::column>> originalColumns;
     originalColumns.reserve(originalNumColumns);

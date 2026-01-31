@@ -803,7 +803,8 @@ ColumnOrView FunctionExpression::eval(
     std::vector<std::unique_ptr<cudf::column>>& inputTableColumns,
     rmm::cuda_stream_view stream,
     rmm::device_async_resource_ref mr,
-    bool finalize) {
+  vector_size_t inputRowCount,
+  bool finalize) {
   using velox::exec::FieldReference;
 
   if (auto fieldExpr = std::dynamic_pointer_cast<FieldReference>(expr_)) {
@@ -817,7 +818,8 @@ ColumnOrView FunctionExpression::eval(
     inputColumns.reserve(subexpressions_.size());
 
     for (const auto& subexpr : subexpressions_) {
-      inputColumns.push_back(subexpr->eval(inputTableColumns, stream, mr));
+      inputColumns.push_back(
+          subexpr->eval(inputTableColumns, stream, mr, inputRowCount));
     }
 
     auto result = function_->eval(inputColumns, stream, mr);

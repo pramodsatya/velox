@@ -38,7 +38,11 @@ class CudfFunctionBaseTest : public velox::functions::test::FunctionBaseTest {
         createCudfExpression({exprSet.exprs()[0]}, input->rowType());
     auto inputColumns = cudfTable->release();
     auto filterColumn = filterEvaluator->eval(
-        inputColumns, stream, cudf::get_current_device_resource_ref());
+        inputColumns,
+        stream,
+        cudf::get_current_device_resource_ref(),
+        input->size(),
+        /*finalize=*/true);
     auto filterColumnView = asView(filterColumn);
     cudf::table_view resultTable({filterColumnView});
     auto result = velox::cudf_velox::with_arrow::toVeloxColumn(

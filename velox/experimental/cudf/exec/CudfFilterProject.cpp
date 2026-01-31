@@ -24,6 +24,7 @@
 #include "velox/expression/FieldReference.h"
 
 #include <cudf/aggregation.hpp>
+#include <cudf/column/column_factories.hpp>
 #include <cudf/reduction.hpp>
 #include <cudf/stream_compaction.hpp>
 #include <cudf/unary.hpp>
@@ -199,6 +200,7 @@ void CudfFilterProject::initialize() {
 
 void CudfFilterProject::addInput(RowVectorPtr input) {
   input_ = std::move(input);
+  currentInputRowCount_ = input_ ? input_->size() : 0;
 }
 
 RowVectorPtr CudfFilterProject::getOutput() {
@@ -216,6 +218,20 @@ RowVectorPtr CudfFilterProject::getOutput() {
   VELOX_CHECK_NOT_NULL(cudfInput);
   auto stream = cudfInput->stream();
   auto inputTableColumns = cudfInput->release()->release();
+  const auto rowCount = input_->size();
+
+  // When the input schema is empty (constant-only projections), add a dummy
+  // fixed-width column to provide row count for precompute instructions that
+  // materialize literals.
+  if (inputTableColumns.empty() && rowCount > 0) {
+    auto mr = cudf::get_current_device_resource_ref();
+    inputTableColumns.push_back(cudf::make_numeric_column(
+        cudf::data_type(cudf::type_id::INT32),
+        rowCount,
+        cudf::mask_state::UNALLOCATED,
+        stream,
+        mr));
+  }
 
   if (hasFilter_) {
     filter(inputTableColumns, stream);
@@ -245,7 +261,11 @@ void CudfFilterProject::filter(
     rmm::cuda_stream_view stream) {
   // Evaluate the Filter
   auto filterColumn = filterEvaluator_->eval(
-      inputTableColumns, stream, cudf::get_current_device_resource_ref(), true);
+      inputTableColumns,
+      stream,
+      cudf::get_current_device_resource_ref(),
+      currentInputRowCount_,
+      true);
   auto filterColumnView = asView(filterColumn);
   bool shouldApplyFilter = [&]() {
     if (filterColumnView.has_nulls()) {
@@ -281,6 +301,7 @@ std::vector<std::unique_ptr<cudf::column>> CudfFilterProject::project(
         inputTableColumns,
         stream,
         cudf::get_current_device_resource_ref(),
+      currentInputRowCount_,
         true));
   }
 
