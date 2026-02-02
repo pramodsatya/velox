@@ -213,9 +213,12 @@ if(VELOX_ENABLE_BENCHMARKS_BASIC)
 endif()
 
 if(VELOX_ENABLE_CUDF)
+  set(VELOX_BUILD ${CMAKE_BUILD_TYPE})
+  set(CMAKE_BUILD_TYPE Release)
   message(STATUS "Building curl from source to satisfy cuDF curl version requirement")
   set(CURL_SOURCE BUNDLED)
   velox_resolve_dependency(CURL)
+  set(CMAKE_BUILD_TYPE ${VELOX_BUILD})
 endif()
 
 if(VELOX_BUILD_TESTING OR VELOX_BUILD_TEST_UTILS)
@@ -473,6 +476,8 @@ if(ENABLE_ALL_WARNINGS)
 endif()
 
 if(VELOX_ENABLE_WAVE OR VELOX_ENABLE_CUDF)
+  set(VELOX_BUILD ${CMAKE_BUILD_TYPE})
+  set(CMAKE_BUILD_TYPE Release)
   enable_language(CUDA)
   # Determine CUDA_ARCHITECTURES automatically.
   cmake_policy(SET CMP0104 NEW)
@@ -507,6 +512,7 @@ if(VELOX_ENABLE_WAVE OR VELOX_ENABLE_CUDF)
       )
     endif()
   endif()
+  set(CMAKE_BUILD_TYPE ${VELOX_BUILD})
 endif()
 
 # Set after the test of the CUDA compiler. Otherwise, the test fails with
