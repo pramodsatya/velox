@@ -13,15 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 #pragma once
+
+#include "velox/core/Expressions.h"
 
 namespace facebook::velox::cudf_velox {
 
-/// CudfQueryConfig - Query session configs for the cuDF Operators.
-struct CudfQueryConfig {
-  // Query config key for the TopN batch size in the cuDF TopN operator.
-  static constexpr const char* kCudfTopNBatchSize{"cudf.topk_batch_size"};
-};
+/// Operator/plan-node level predicate: can a group of expressions
+/// (e.g. filter + projections) be evaluated by the CUDF operator.
+bool canBeEvaluatedByCudf(const std::vector<core::TypedExprPtr>& exprs);
 
 } // namespace facebook::velox::cudf_velox
