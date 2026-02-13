@@ -16,6 +16,7 @@
 #pragma once
 
 #include "velox/experimental/cudf/exec/NvtxHelper.h"
+#include "velox/experimental/cudf/plan/CudfPlanNodeChecker.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
 
 #include "velox/exec/Operator.h"
@@ -169,6 +170,11 @@ using StepAwareAggregationRegistry = std::unordered_map<
 // Get the step-aware aggregation registry
 StepAwareAggregationRegistry& getStepAwareAggregationRegistry();
 
+// Get aggregation function signatures map from the CUDF registry
+// Returns a map of function names to their function signatures (using single step only)
+std::unordered_map<std::string, std::vector<const exec::FunctionSignature*>>
+getCudfAggregationFunctionSignatureMap();
+
 // Register aggregation function signatures for a specific step
 bool registerAggregationFunctionForStep(
     const std::string& name,
@@ -178,30 +184,5 @@ bool registerAggregationFunctionForStep(
 
 // Register step-aware builtin aggregation functions
 bool registerStepAwareBuiltinAggregationFunctions(const std::string& prefix);
-
-// Step-aware aggregation validation function
-bool canAggregationBeEvaluatedByCudf(
-    const core::CallTypedExpr& call,
-    core::AggregationNode::Step step,
-    const std::vector<TypePtr>& rawInputTypes,
-    core::QueryCtx* queryCtx);
-
-bool canBeEvaluatedByCudf(
-    const core::AggregationNode& aggregationNode,
-    core::QueryCtx* queryCtx);
-
-// Utility functions
-core::TypedExprPtr expandFieldReference(
-    const core::TypedExprPtr& expr,
-    const core::PlanNode* sourceNode);
-
-bool canGroupingKeysBeEvaluatedByCudf(
-    const std::vector<core::FieldAccessTypedExprPtr>& groupingKeys,
-    const core::PlanNode* sourceNode,
-    core::QueryCtx* queryCtx);
-
-bool matchTypedCallAgainstSignatures(
-    const core::CallTypedExpr& call,
-    const std::vector<exec::FunctionSignaturePtr>& sigs);
 
 } // namespace facebook::velox::cudf_velox

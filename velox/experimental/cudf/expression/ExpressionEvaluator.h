@@ -18,6 +18,7 @@
 
 #include "velox/expression/Expr.h"
 #include "velox/expression/FunctionSignature.h"
+#include "velox/expression/VectorFunction.h"
 #include "velox/type/Type.h"
 
 #include <cudf/column/column.hpp>
@@ -26,6 +27,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <variant>
 #include <vector>
 
@@ -93,6 +95,22 @@ void registerCudfFunctions(
 
 bool registerBuiltinFunctions(const std::string& prefix);
 
+// Get the cudf function registry (exposed for metadata collection)
+std::unordered_map<std::string, CudfFunctionSpec>& getCudfFunctionRegistry();
+
+// Get function signatures map from the CUDF registry
+// Returns a map of function names to their function signatures
+std::unordered_map<std::string, std::vector<const exec::FunctionSignature*>>
+getCudfFunctionSignatureMap();
+
+// Get function signatures with metadata from the CUDF registry
+// Returns a map of function names to pairs of metadata and signatures
+std::unordered_map<
+  std::string,
+  std::vector<
+    std::pair<exec::VectorFunctionMetadata, const exec::FunctionSignature*>>>
+getCudfFunctionSignaturesAndMetadata();
+
 class CudfExpression {
  public:
   virtual ~CudfExpression() = default;
@@ -108,24 +126,20 @@ class CudfExpression {
 using CudfExpressionPtr = std::shared_ptr<CudfExpression>;
 
 using CudfExpressionEvaluatorCanEvaluate =
+    std::function<bool(const velox::core::TypedExprPtr& expr)>;
+using CudfExpressionEvaluatorCanEvaluateExec =
     std::function<bool(std::shared_ptr<velox::exec::Expr> expr)>;
 using CudfExpressionEvaluatorCreate =
     std::function<std::shared_ptr<CudfExpression>(
         std::shared_ptr<velox::exec::Expr> expr,
         const RowTypePtr& inputRowSchema)>;
 
-// Register a CudfExpression evaluator.
-// - name: unique identifier (e.g., "ast", "function", "my_custom").
-// - priority: higher number = higher priority.
-// - canEvaluate: shallow check whether evaluator can handle current expr root.
-// - create: factory to build the evaluator node.
-// - overwrite: replace existing registration with the same name if true.
-bool registerCudfExpressionEvaluator(
-    const std::string& name,
-    int priority,
-    CudfExpressionEvaluatorCanEvaluate canEvaluate,
-    CudfExpressionEvaluatorCreate create,
-    bool overwrite = true);
+struct CudfExpressionEvaluatorEntry {
+  int priority;
+  CudfExpressionEvaluatorCanEvaluate canEvaluate;
+  CudfExpressionEvaluatorCanEvaluateExec canEvaluateExec;
+  CudfExpressionEvaluatorCreate create;
+};
 
 class FunctionExpression : public CudfExpression {
  public:
@@ -148,6 +162,8 @@ class FunctionExpression : public CudfExpression {
   // (does not recursively check children)
   static bool canEvaluate(std::shared_ptr<velox::exec::Expr> expr);
 
+  static bool canEvaluate(const velox::core::TypedExprPtr& expr);
+
  private:
   std::shared_ptr<velox::exec::Expr> expr_;
   std::shared_ptr<CudfFunction> function_;
@@ -161,8 +177,9 @@ std::shared_ptr<CudfExpression> createCudfExpression(
     const RowTypePtr& inputRowSchema,
     std::optional<std::string> except = std::nullopt);
 
-/// Lightweight check if an expression tree is supported by any CUDF evaluator
-/// without initializing CudfExpression objects.
+/// @deprecated: prefer canBeEvaluatedByCudf variant that uses
+/// core::TypedExprPtr. Checks if an expression tree is supported by any CUDF
+/// evaluator without initializing CudfExpression objects.
 /// \param expr Expression to check
 /// \param deep If true, recursively check all children in the expression tree;
 ///             if false, only check if the top-level operation is supported
