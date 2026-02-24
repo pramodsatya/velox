@@ -44,6 +44,7 @@
 #include <cudf/utilities/error.hpp>
 
 #include <algorithm>
+#include <map>
 #include <vector>
 
 namespace {
@@ -1513,6 +1514,136 @@ void CudfHashAggregation::doNoMoreInput() {
 
 bool CudfHashAggregation::isFinished() {
   return finished_;
+}
+
+// Get aggregation function signatures map from the CUDF registry
+exec::AggregateFunctionSignatureMap getCudfAggregationFunctionSignatureMap() {
+  exec::AggregateFunctionSignatureMap result;
+  const auto& registry = getStepAwareAggregationRegistry();
+
+  for (const auto& [name, stepMap] : registry) {
+    const auto singleIt = stepMap.find(core::AggregationNode::Step::kSingle);
+    const auto partialIt = stepMap.find(core::AggregationNode::Step::kPartial);
+
+    // We need both single (for return type) and partial (for intermediate
+    // type) signatures to build AggregateFunctionSignature entries.
+    if (singleIt == stepMap.end() || partialIt == stepMap.end()) {
+      continue;
+    }
+
+    const auto& singleSignatures = singleIt->second;
+    const auto& partialSignatures = partialIt->second;
+
+    if (singleSignatures.empty() || partialSignatures.empty()) {
+      continue;
+    }
+
+    auto makeSignatureKey = [](const exec::FunctionSignaturePtr& signature) {
+      std::string key = signature->toString();
+      key.push_back('|');
+      for (const auto isConstantArg : signature->constantArguments()) {
+        key.push_back(isConstantArg ? '1' : '0');
+      }
+      return key;
+    };
+
+    std::unordered_map<std::string, exec::FunctionSignaturePtr>
+        singleSignatureIndex;
+    for (const auto& signature : singleSignatures) {
+      auto key = makeSignatureKey(signature);
+      auto [it, inserted] =
+          singleSignatureIndex.emplace(std::move(key), signature);
+      if (!inserted) {
+        LOG(WARNING) << "Duplicate single signature for aggregate function "
+                     << name << ": " << it->first;
+      }
+    }
+
+    std::unordered_map<std::string, exec::FunctionSignaturePtr>
+        partialSignatureIndex;
+    for (const auto& signature : partialSignatures) {
+      auto key = makeSignatureKey(signature);
+      auto [it, inserted] =
+          partialSignatureIndex.emplace(std::move(key), signature);
+      if (!inserted) {
+        LOG(WARNING) << "Duplicate partial signature for aggregate function "
+                     << name << ": " << it->first;
+      }
+    }
+
+    std::vector<exec::AggregateFunctionSignaturePtr> aggregateSignatures;
+    aggregateSignatures.reserve(
+        std::min(singleSignatureIndex.size(), partialSignatureIndex.size()));
+
+    for (const auto& [key, singleSignature] : singleSignatureIndex) {
+      auto partialMatchIt = partialSignatureIndex.find(key);
+      if (partialMatchIt == partialSignatureIndex.end()) {
+        LOG(WARNING) << "No matching partial signature for aggregate function "
+                     << name << " and key " << key;
+        continue;
+      }
+
+      const auto& partialSignature = partialMatchIt->second;
+
+      exec::AggregateFunctionSignatureBuilder builder;
+
+      // Preserve declared signature variables.
+      for (const auto& [_, variable] : singleSignature->variables()) {
+        if (variable.isTypeParameter()) {
+          if (variable.knownTypesOnly()) {
+            builder.knownTypeVariable(variable.name());
+          } else if (variable.orderableTypesOnly()) {
+            builder.orderableTypeVariable(variable.name());
+          } else if (variable.comparableTypesOnly()) {
+            builder.comparableTypeVariable(variable.name());
+          } else {
+            builder.typeVariable(variable.name());
+          }
+        } else if (variable.isIntegerParameter()) {
+          builder.integerVariable(
+              variable.name(),
+              variable.constraint().empty()
+                  ? std::nullopt
+                  : std::make_optional(variable.constraint()));
+        }
+      }
+
+      builder.returnType(singleSignature->returnType().toString());
+      builder.intermediateType(partialSignature->returnType().toString());
+
+      const auto& argumentTypes = singleSignature->argumentTypes();
+      const auto& constantArguments = singleSignature->constantArguments();
+      for (size_t argIndex = 0; argIndex < argumentTypes.size(); ++argIndex) {
+        const auto argType = argumentTypes[argIndex].toString();
+        const bool isConstantArg =
+            argIndex < constantArguments.size() && constantArguments[argIndex];
+        if (isConstantArg) {
+          builder.constantArgumentType(argType);
+        } else {
+          builder.argumentType(argType);
+        }
+      }
+
+      if (singleSignature->variableArity()) {
+        builder.variableArity();
+      }
+
+      aggregateSignatures.push_back(builder.build());
+    }
+
+    for (const auto& [key, _] : partialSignatureIndex) {
+      if (singleSignatureIndex.find(key) == singleSignatureIndex.end()) {
+        LOG(WARNING) << "No matching single signature for aggregate function "
+                     << name << " and key " << key;
+      }
+    }
+
+    if (!aggregateSignatures.empty()) {
+      result[name] = std::move(aggregateSignatures);
+    }
+  }
+
+  return result;
 }
 
 bool registerAggregationFunctionForStep(

@@ -95,6 +95,11 @@ bool registerBuiltinFunctions(const std::string& prefix);
 
 void unregisterFunctions();
 
+// Get function signatures map from the CUDF registry
+// Returns a map of function names to their function signatures
+std::unordered_map<std::string, std::vector<const exec::FunctionSignature*>>
+getCudfFunctionSignatureMap();
+
 class CudfExpression {
  public:
   virtual ~CudfExpression() = default;

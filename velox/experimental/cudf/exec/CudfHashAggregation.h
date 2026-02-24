@@ -18,12 +18,11 @@
 #include "velox/experimental/cudf/exec/CudfOperator.h"
 #include "velox/experimental/cudf/vector/CudfVector.h"
 
+#include "velox/exec/Aggregate.h"
 #include "velox/exec/Operator.h"
 #include "velox/expression/FunctionSignature.h"
 
 #include <cudf/groupby.hpp>
-
-#include <unordered_map>
 
 namespace facebook::velox::cudf_velox {
 
@@ -177,6 +176,9 @@ class CudfHashAggregation : public CudfOperatorBase {
   CudfVectorPtr bufferedResult_;
   RowTypePtr bufferedResultType_;
 };
+
+// Get aggregation function signatures map from the CUDF registry.
+exec::AggregateFunctionSignatureMap getCudfAggregationFunctionSignatureMap();
 
 // Register aggregation function signatures for a specific step
 bool registerAggregationFunctionForStep(
