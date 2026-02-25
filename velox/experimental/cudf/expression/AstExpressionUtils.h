@@ -16,7 +16,7 @@
 
 #pragma once
 
-#include "velox/experimental/cudf/CudfConfig.h"
+#include "velox/experimental/cudf/common/CudfConfig.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 #include "velox/experimental/cudf/expression/AstExpression.h"
@@ -225,8 +225,8 @@ bool isAstExprSupported(const std::shared_ptr<velox::exec::Expr>& expr) {
   using velox::exec::FieldReference;
   using Op = cudf::ast::ast_operator;
 
-  const auto name =
-      stripPrefix(expr->name(), CudfConfig::getInstance().functionNamePrefix);
+  const auto name = stripPrefix(
+      expr->name(), CudfSystemConfig::getInstance().functionNamePrefix());
   const auto len = expr->inputs().size();
 
   // Literals and field references are always supported
@@ -417,8 +417,8 @@ cudf::ast::expression const& AstContext::multipleInputsToPairWise(
     const std::shared_ptr<velox::exec::Expr>& expr) {
   using Operation = cudf::ast::operation;
 
-  const auto name =
-      stripPrefix(expr->name(), CudfConfig::getInstance().functionNamePrefix);
+  const auto name = stripPrefix(
+      expr->name(), CudfSystemConfig::getInstance().functionNamePrefix());
   auto len = expr->inputs().size();
   // Create a simple chain of operations
   auto result = &pushExprToTree(expr->inputs()[0]);
@@ -443,8 +443,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
   using velox::exec::ConstantExpr;
   using velox::exec::FieldReference;
 
-  const auto name =
-      stripPrefix(expr->name(), CudfConfig::getInstance().functionNamePrefix);
+  const auto name = stripPrefix(
+      expr->name(), CudfSystemConfig::getInstance().functionNamePrefix());
   auto len = expr->inputs().size();
   auto& type = expr->type();
 
@@ -487,7 +487,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
   } else if (name == "isnotnull") {
     VELOX_CHECK_EQ(len, 1);
     auto const& op1 = pushExprToTree(expr->inputs()[0]);
-    auto const& nullOp = tree.push(Operation{Op::IS_NULL, op1});
+    auto const& nullOp = tree.push(Operation{Op::IS_NULL, op1));
     return tree.push(Operation{Op::NOT, nullOp});
   } else if (name == "between") {
     VELOX_CHECK_EQ(len, 3);
@@ -495,9 +495,12 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     auto const& lower = pushExprToTree(expr->inputs()[1]);
     auto const& upper = pushExprToTree(expr->inputs()[2]);
     // construct between(op2, op3) using >= and <=
-    auto const& geLower = tree.push(Operation{Op::GREATER_EQUAL, value, lower});
-    auto const& leUpper = tree.push(Operation{Op::LESS_EQUAL, value, upper});
-    return tree.push(Operation{Op::NULL_LOGICAL_AND, geLower, leUpper});
+    auto const& geLower =
+        tree.push(Operation{Op::GREATER_EQUAL, value, lower});
+    auto const& leUpper =
+        tree.push(Operation{Op::LESS_EQUAL, value, upper});
+    return tree.push(
+        Operation{Op::NULL_LOGICAL_AND, geLower, leUpper});
   } else if (name == "in") {
     // number of inputs is variable. >=2
     VELOX_CHECK_EQ(len, 2);
@@ -515,7 +518,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     std::vector<const cudf::ast::expression*> exprVec;
     for (auto& literal : literals) {
       auto const& opi = tree.push(std::move(literal));
-      auto const& logicalNode = tree.push(Operation{Op::EQUAL, op1, opi});
+      auto const& logicalNode =
+          tree.push(Operation{Op::EQUAL, op1, opi});
       exprVec.push_back(&logicalNode);
     }
 
@@ -532,8 +536,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     // OR all logical nodes
     auto* result = exprVec[0];
     for (size_t i = 1; i < exprVec.size(); i++) {
-      auto const& treeNode =
-          tree.push(Operation{Op::NULL_LOGICAL_OR, *result, *exprVec[i]});
+      auto const& treeNode = tree.push(
+          Operation{Op::NULL_LOGICAL_OR, *result, *exprVec[i]});
       result = &treeNode;
     }
     return *result;

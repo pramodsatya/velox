@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include "velox/experimental/cudf/CudfConfig.h"
 #include "velox/experimental/cudf/CudfNoDefaults.h"
+#include "velox/experimental/cudf/common/CudfConfig.h"
 #include "velox/experimental/cudf/exec/CudfTopN.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
 
@@ -40,7 +40,8 @@ CudfTopN::CudfTopN(
           fmt::format("[{}]", topNNode->id())),
       count_(topNNode->count()),
       topNNode_(topNNode),
-      kBatchSize_(CudfConfig::getInstance().topNBatchSize) {
+      kBatchSize_(0) {
+  kBatchSize_ = operatorCtx_->execCtx()->queryCtx()->cudfConfig().topNBatchSize();
   const auto numColumns{outputType_->children().size()};
   const auto numSortingKeys{topNNode->sortingKeys().size()};
   std::vector<bool> isSortingKey(numColumns);

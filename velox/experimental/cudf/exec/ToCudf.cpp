@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "velox/experimental/cudf/CudfConfig.h"
+#include "velox/experimental/cudf/common/CudfConfig.h"
 #include "velox/experimental/cudf/connectors/hive/CudfHiveConnector.h"
 #include "velox/experimental/cudf/connectors/hive/CudfHiveDataSource.h"
 #include "velox/experimental/cudf/exec/CudfAssignUniqueId.h"
@@ -84,9 +84,11 @@ core::PlanNodePtr CompileState::getPlanNode(const core::PlanNodeId& id) const {
 
 bool CompileState::compile(bool allowCpuFallback) {
   auto operators = driver_.operators();
+  auto ctx = driver_.driverCtx();
 
   // Cache debug flag to avoid repeated getInstance() calls
-  const bool debugEnabled = CudfConfig::getInstance().debugEnabled;
+  const bool debugEnabled =
+      ctx->task->queryCtx()->cudfConfig().debugEnabled();
 
   // Cache "before" operator descriptions so we can print before/after together.
   std::vector<std::pair<int32_t, std::string>> beforeOperators;
@@ -97,8 +99,6 @@ bool CompileState::compile(bool allowCpuFallback) {
   }
 
   bool replacementsMade = false;
-  auto ctx = driver_.driverCtx();
-
   // Helper to check if planNodeId is valid (some operators like CallbackSink
   // have "N/A")
   auto isValidPlanNodeId = [](const core::PlanNodeId& id) {
@@ -293,8 +293,7 @@ struct CudfDriverAdapter {
 
   // Call operator needed by DriverAdapter
   bool operator()(const exec::DriverFactory& factory, exec::Driver& driver) {
-    if (!driver.driverCtx()->queryConfig().get<bool>(
-            CudfConfig::kCudfEnabled, CudfConfig::getInstance().enabled) &&
+    if (!driver.driverCtx()->task->queryCtx()->cudfConfig().debugEnabled() &&
         allowCpuFallback_) {
       return false;
     }
@@ -321,16 +320,20 @@ void registerCudf() {
   // Register operator adapters
   registerAllOperatorAdapters();
 
-  auto prefix = CudfConfig::getInstance().functionNamePrefix;
+  auto& config = CudfConfig::getInstance();
+
+  auto prefix =
+      config.get<std::string>(CudfConfig::kCudfFunctionNamePrefixEntry);
   registerBuiltinFunctions(prefix);
   registerStepAwareBuiltinAggregationFunctions(prefix);
 
   CUDF_FUNC_RANGE();
   cudaFree(nullptr); // Initialize CUDA context at startup
 
-  const std::string mrMode = CudfConfig::getInstance().memoryResource;
+  // Initialize device memory resource from config
   auto mr = cudf_velox::createMemoryResource(
-      mrMode, CudfConfig::getInstance().memoryPercent);
+      config.get<std::string>(CudfConfig::kCudfMemoryResourceEntry.name),
+      config.get<int32_t>(CudfConfig::kCudfMemoryPercentEntry.name));
   cudf::set_current_device_resource(mr.get());
   mr_ = mr;
 
@@ -344,16 +347,20 @@ void registerCudf() {
 
   exec::Operator::registerOperator(
       std::make_unique<CudfHashJoinBridgeTranslator>());
-  CudfDriverAdapter cda{CudfConfig::getInstance().allowCpuFallback};
+  const auto allowCpuFallback =
+      config.get<bool>(CudfConfig::kCudfAllowCpuFallbackEntry.name);
+  CudfDriverAdapter cda{allowCpuFallback};
   exec::DriverAdapter cudfAdapter{kCudfAdapterName, {}, cda};
   exec::DriverFactory::registerAdapter(cudfAdapter);
 
-  if (CudfConfig::getInstance().astExpressionEnabled) {
-    registerAstEvaluator(CudfConfig::getInstance().astExpressionPriority);
+  if (config.get<bool>(CudfConfig::kCudfAstExpressionEnabledEntry.name)) {
+    registerAstEvaluator(
+        config.get<int32_t>(CudfConfig::kCudfAstExpressionPriorityEntry.name));
   }
 
-  if (CudfConfig::getInstance().jitExpressionEnabled) {
-    registerJitEvaluator(CudfConfig::getInstance().jitExpressionPriority);
+  if (config.get<bool>(CudfConfig::kCudfJitExpressionEnabledEntry.name)) {
+    registerJitEvaluator(
+        config.get<int32_t>(CudfConfig::kCudfJitExpressionPriorityEntry.name));
   }
 
   isCudfRegistered = true;
@@ -372,52 +379,6 @@ void unregisterCudf() {
       exec::DriverFactory::adapters.end());
 
   isCudfRegistered = false;
-}
-
-CudfConfig& CudfConfig::getInstance() {
-  static CudfConfig instance;
-  return instance;
-}
-
-void CudfConfig::initialize(
-    std::unordered_map<std::string, std::string>&& config) {
-  if (config.find(kCudfEnabled) != config.end()) {
-    enabled = folly::to<bool>(config[kCudfEnabled]);
-  }
-  if (config.find(kCudfDebugEnabled) != config.end()) {
-    debugEnabled = folly::to<bool>(config[kCudfDebugEnabled]);
-  }
-  if (config.find(kCudfMemoryResource) != config.end()) {
-    memoryResource = config[kCudfMemoryResource];
-  }
-  if (config.find(kCudfMemoryPercent) != config.end()) {
-    memoryPercent = folly::to<int32_t>(config[kCudfMemoryPercent]);
-  }
-  if (config.find(kCudfOutputMr) != config.end()) {
-    outputMemoryResource = config[kCudfOutputMr];
-  }
-  if (config.find(kCudfFunctionNamePrefix) != config.end()) {
-    functionNamePrefix = config[kCudfFunctionNamePrefix];
-  }
-  if (config.find(kCudfAstExpressionEnabled) != config.end()) {
-    astExpressionEnabled = folly::to<bool>(config[kCudfAstExpressionEnabled]);
-  }
-  if (config.find(kCudfJitExpressionEnabled) != config.end()) {
-    jitExpressionEnabled = folly::to<bool>(config[kCudfJitExpressionEnabled]);
-  }
-  if (config.find(kCudfAstExpressionPriority) != config.end()) {
-    astExpressionPriority =
-        folly::to<int32_t>(config[kCudfAstExpressionPriority]);
-  }
-  if (config.find(kCudfAllowCpuFallback) != config.end()) {
-    allowCpuFallback = folly::to<bool>(config[kCudfAllowCpuFallback]);
-  }
-  if (config.find(kCudfLogFallback) != config.end()) {
-    logFallback = folly::to<bool>(config[kCudfLogFallback]);
-  }
-  if (config.find(kCudfTopNBatchSize) != config.end()) {
-    topNBatchSize = folly::to<int32_t>(config[kCudfTopNBatchSize]);
-  }
 }
 
 } // namespace facebook::velox::cudf_velox
