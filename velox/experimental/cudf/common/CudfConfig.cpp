@@ -25,24 +25,19 @@
 namespace facebook::velox::cudf_velox {
 
 CudfQueryConfig::CudfQueryConfig()
-    : config_(
+    : configEntries_{kCudfEnabledEntry, kCudfDebugEnabledEntry, kCudfLogFallbackEntry, kCudfTopNBatchSizeEntry, kCudfAllowCpuFallbackEntry, kCudfMemoryPercentEntry},
+      config_(
           std::make_shared<velox::config::ConfigBase>(
               std::unordered_map<std::string, std::string>{},
               true)) {}
 
 CudfQueryConfig::CudfQueryConfig(
     std::unordered_map<std::string, std::string>&& values)
-    : config_(
+    : configEntries_{kCudfEnabledEntry, kCudfDebugEnabledEntry, kCudfLogFallbackEntry, kCudfTopNBatchSizeEntry, kCudfAllowCpuFallbackEntry, kCudfMemoryPercentEntry},
+      config_(
           std::make_shared<velox::config::ConfigBase>(
               std::move(values),
               true)) {
-  // Initialize config entries metadata
-  configEntries_ = {
-      kCudfEnabledEntry,
-      kCudfDebugEnabledEntry,
-      kCudfLogFallbackEntry,
-      kCudfTopNBatchSizeEntry};
-
   validateConfigs();
 }
 
@@ -61,6 +56,14 @@ void CudfQueryConfig::validateConfigs() {
     auto batchSize = folly::to<int32_t>(cudfTopNBatchSize);
     VELOX_USER_CHECK_GT(
         batchSize, 0, "cudf.topn_batch_size must be greater than 0");
+  }
+  // Use optional get to check only if user explicitly set the value.
+  if (auto cudfMemoryPercent =
+          config_->get<int32_t>(kCudfMemoryPercentEntry.name)) {
+    VELOX_USER_CHECK_GT(
+        cudfMemoryPercent.value(),
+        0,
+        "cudf.memory_percent must be greater than 0");
   }
 }
 
@@ -99,9 +102,6 @@ void CudfSystemConfig::updateConfigs(
     std::unordered_map<std::string, std::string>&& config) {
   for (auto& [key, value] : config) {
     set(key, value);
-
-    // TODO(ps): Deprecate fallback to underscore-delimited query level config.
-    CudfQueryConfig::getInstance().set(key, value);
   }
 }
 

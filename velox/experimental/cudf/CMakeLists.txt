@@ -12,7 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-add_subdirectory(common)
+# common is always added by velox/CMakeLists.txt unconditionally.
+# Only add it here if not already added (i.e., when VELOX_ENABLE_CUDF is ON).
+if(NOT TARGET velox_cudf_config)
+  add_subdirectory(common)
+endif()
 add_subdirectory(exec)
 add_subdirectory(connectors)
 add_subdirectory(vector)

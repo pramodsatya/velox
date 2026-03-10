@@ -35,6 +35,7 @@ velox_link_libraries(
     velox_caching
     velox_common_config
     velox_connector
+    velox_cudf_config
     velox_exception
     velox_expression_functions
     velox_memory

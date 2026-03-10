@@ -67,6 +67,10 @@ if(${VELOX_ENABLE_DUCKDB})
   add_subdirectory(duckdb)
 endif()
 
+# velox_cudf_config (plain C++, no CUDA) is always built so it can be linked
+# by presto sidecar session properties even when VELOX_ENABLE_CUDF is OFF.
+add_subdirectory(experimental/cudf/common)
+
 if(VELOX_ENABLE_WAVE OR VELOX_ENABLE_CUDF)
   add_subdirectory(experimental/gpu)
   if(${VELOX_ENABLE_CUDF})

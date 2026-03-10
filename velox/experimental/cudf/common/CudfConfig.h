@@ -81,6 +81,21 @@ class CudfQueryConfig {
       velox::INTEGER(),
       "4"};
 
+  /// Allow fallback to CPU operators if GPU operator replacement fails.
+  inline static const CudfQueryConfigEntry kCudfAllowCpuFallbackEntry{
+      "cudf.allow_cpu_fallback",
+      velox::BOOLEAN(),
+      "true"};
+
+  /// The percent of GPU memory to allocate for cuDF memory resource.
+  inline static const CudfQueryConfigEntry kCudfMemoryPercentEntry{
+      "cudf.memory_percent",
+      velox::INTEGER(),
+      "50"};
+
+  /// Alias so callers can use CudfQueryConfig::CudfConfigEntry.
+  using CudfConfigEntry = CudfQueryConfigEntry;
+
   /// Singleton CudfQueryConfig instance.
   static CudfQueryConfig& getInstance();
 
