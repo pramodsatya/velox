@@ -1969,9 +1969,7 @@ bool hasOnlyConstantArguments(const core::CallTypedExpr& call) {
 // Step-aware aggregation validation function
 bool canAggregationBeEvaluatedByCudf(
     const core::CallTypedExpr& call,
-    core::AggregationNode::Step step,
-    const std::vector<TypePtr>& rawInputTypes,
-    core::QueryCtx* queryCtx) {
+  core::AggregationNode::Step step) {
   // Check against step-aware aggregation registry
   const auto companionStep = getCompanionStep(call.name(), step);
   const auto originalName = getOriginalName(call.name());
@@ -2001,26 +1999,23 @@ bool canAggregationBeEvaluatedByCudf(
   return matchTypedCallAgainstSignatures(call, stepIt->second);
 }
 
-bool canBeEvaluatedByCudf(
-    const core::AggregationNode& aggregationNode,
-    core::QueryCtx* queryCtx) {
-  const core::PlanNode* sourceNode = aggregationNode.sources().empty()
+bool canBeEvaluatedByCudf(const core::AggregationNode* aggregationNode) {
+  const core::PlanNode* sourceNode = aggregationNode->sources().empty()
       ? nullptr
-      : aggregationNode.sources()[0].get();
+      : aggregationNode->sources()[0].get();
 
   // Get the aggregation step from the node
-  auto step = aggregationNode.step();
+  auto step = aggregationNode->step();
 
   if (sourceNode && sourceNode->outputType()->size() == 0 &&
-      !isSupportedZeroColumnAggregation(aggregationNode)) {
+      !isSupportedZeroColumnAggregation(*aggregationNode)) {
     return false;
   }
 
   // Check supported aggregation functions using step-aware aggregation registry
-  for (const auto& aggregate : aggregationNode.aggregates()) {
+  for (const auto& aggregate : aggregationNode->aggregates()) {
     // Use step-aware validation that handles partial/final/intermediate steps
-    if (!canAggregationBeEvaluatedByCudf(
-            *aggregate.call, step, aggregate.rawInputTypes, queryCtx)) {
+    if (!canAggregationBeEvaluatedByCudf(*aggregate.call, step)) {
       return false;
     }
 
@@ -2046,8 +2041,7 @@ bool canBeEvaluatedByCudf(
     // Check input expressions can be evaluated by cuDF, expand the input first.
     for (const auto& input : aggregate.call->inputs()) {
       auto expandedInput = expandFieldReference(input, sourceNode);
-      std::vector<core::TypedExprPtr> exprs = {expandedInput};
-      if (!canBeEvaluatedByCudf(exprs, queryCtx)) {
+      if (!canBeEvaluatedByCudf(expandedInput)) {
         return false;
       }
     }
@@ -2055,7 +2049,7 @@ bool canBeEvaluatedByCudf(
 
   // Check grouping key expressions
   if (!canGroupingKeysBeEvaluatedByCudf(
-          aggregationNode.groupingKeys(), sourceNode, queryCtx)) {
+      aggregationNode->groupingKeys(), sourceNode)) {
     return false;
   }
 
@@ -2088,13 +2082,11 @@ core::TypedExprPtr expandFieldReference(
 
 bool canGroupingKeysBeEvaluatedByCudf(
     const std::vector<core::FieldAccessTypedExprPtr>& groupingKeys,
-    const core::PlanNode* sourceNode,
-    core::QueryCtx* queryCtx) {
+    const core::PlanNode* sourceNode) {
   // Check grouping key expressions (with expansion)
   for (const auto& groupingKey : groupingKeys) {
     auto expandedKey = expandFieldReference(groupingKey, sourceNode);
-    std::vector<core::TypedExprPtr> exprs = {expandedKey};
-    if (!canBeEvaluatedByCudf(exprs, queryCtx)) {
+    if (!canBeEvaluatedByCudf(expandedKey)) {
       return false;
     }
   }

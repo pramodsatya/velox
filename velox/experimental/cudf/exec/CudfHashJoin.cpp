@@ -22,9 +22,11 @@
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 #include "velox/experimental/cudf/expression/AstExpression.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
 
 #include "velox/core/PlanNode.h"
 #include "velox/exec/Task.h" // NOLINT(misc-unused-headers)
+
 #include "velox/type/TypeUtil.h"
 
 #include <cudf/aggregation.hpp>
@@ -410,27 +412,21 @@ void CudfHashJoinProbe::initialize() {
     return;
   }
 
-  // simplify expression
-  exec::ExprSet exprs({joinNode_->filter()}, operatorCtx_->execCtx());
-  VELOX_CHECK_EQ(exprs.exprs().size(), 1);
-
-  // Create a reusable evaluator for the filter column. This is expensive to
-  // build, and the expression + input schema are stable for the lifetime of
-  // the operator instance.
+  // Compile the filter expression against the concatenated (probe + build)
+  // schema.  The compiler folds constants and resolves evaluator boundaries.
   std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
-  filterEvaluator_ = createCudfExpression(
-      exprs.exprs()[0], facebook::velox::type::concatRowTypes(filterRowTypes));
+  CudfExpressionCompiler compiler(
+      facebook::velox::type::concatRowTypes(filterRowTypes),
+      operatorCtx_->execCtx()->queryCtx(),
+      operatorCtx_->pool());
+  filterEvaluator_ = compiler.compile(joinNode_->filter());
 
-  // We don't need to get tables that contain conditional comparison columns
-  // We'll pass the entire table. The ast will handle finding the required
-  // columns. This is required because we build the ast with whole row schema
-  // and the column locations in that schema translate to column locations
-  // in whole tables
-
-  // create ast tree
+  // Build a separate cudf::ast::tree for the two-table
+  // cudf::filter_join_indices() API, using the per-side schemas.
+  // Unsupported sub-expressions are compiled on-demand by the AST builder.
   if (joinNode_->isRightJoin() || joinNode_->isRightSemiFilterJoin()) {
     createAstTree(
-        exprs.exprs()[0],
+        compiler.optimizedExpr(),
         tree_,
         scalars_,
         buildType_,
@@ -439,7 +435,7 @@ void CudfHashJoinProbe::initialize() {
         leftPrecomputeInstructions_);
   } else {
     createAstTree(
-        exprs.exprs()[0],
+        compiler.optimizedExpr(),
         tree_,
         scalars_,
         probeType_,

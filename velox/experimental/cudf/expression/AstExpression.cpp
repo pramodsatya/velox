@@ -19,19 +19,16 @@
 #include "velox/experimental/cudf/expression/AstExpressionUtils.h"
 #include "velox/experimental/cudf/expression/AstPrinter.h"
 #include "velox/experimental/cudf/expression/AstUtils.h"
+#include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
 #include "velox/experimental/cudf/vector/TableViewPrinter.h"
 
-#include "velox/expression/ConstantExpr.h"
-#include "velox/expression/FieldReference.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/ConstantVector.h"
 
 namespace facebook::velox::cudf_velox {
 
-// Create tree from Expr
-// and collect precompute instructions for non-ast operations
 cudf::ast::expression const& createAstTree(
-    const std::shared_ptr<velox::exec::Expr>& expr,
+    const core::TypedExprPtr& expr,
     cudf::ast::tree& tree,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
@@ -42,7 +39,7 @@ cudf::ast::expression const& createAstTree(
 }
 
 cudf::ast::expression const& createAstTree(
-    const std::shared_ptr<velox::exec::Expr>& expr,
+    const core::TypedExprPtr& expr,
     cudf::ast::tree& tree,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& leftRowSchema,
@@ -59,7 +56,7 @@ cudf::ast::expression const& createAstTree(
 }
 
 ASTExpression::ASTExpression(
-    std::shared_ptr<velox::exec::Expr> expr,
+    const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema)
     : expr_(expr), inputRowSchema_(inputRowSchema) {
   createAstTree(
@@ -124,19 +121,19 @@ ColumnOrView ASTExpression::eval(
   return result;
 }
 
-bool ASTExpression::canEvaluate(std::shared_ptr<velox::exec::Expr> expr) {
-  return detail::isAstExprSupported(expr);
+bool ASTExpression::canEvaluate(const core::TypedExprPtr& expr) {
+  return isInputFieldReference(expr) || detail::isAstExprSupported(expr);
 }
 
 void registerAstEvaluator(int priority) {
   registerCudfExpressionEvaluator(
       kAstEvaluatorName,
       priority,
-      [](std::shared_ptr<velox::exec::Expr> expr) {
+      [](const core::TypedExprPtr& expr) {
         return ASTExpression::canEvaluate(expr);
       },
-      [](std::shared_ptr<velox::exec::Expr> expr, const RowTypePtr& row) {
-        return std::make_shared<ASTExpression>(std::move(expr), row);
+      [](const core::TypedExprPtr& expr, const RowTypePtr& row) {
+        return std::make_shared<ASTExpression>(expr, row);
       },
       /*overwrite=*/false);
 }

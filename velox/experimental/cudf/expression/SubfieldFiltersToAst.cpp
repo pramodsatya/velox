@@ -15,6 +15,7 @@
  */
 #include "velox/experimental/cudf/expression/AstUtils.h"
 #include "velox/experimental/cudf/expression/SubfieldFiltersToAst.h"
+#include "velox/experimental/cudf/exec/GpuResources.h"
 
 #include "velox/common/base/Exceptions.h"
 
@@ -334,8 +335,10 @@ cudf::ast::expression const& createAstFromSubfieldFilter(
   using Op = cudf::ast::ast_operator;
   using Operation = cudf::ast::operation;
 
-  auto stream = cudf::get_default_stream(cudf::allow_default_stream);
-  auto mr = get_temp_mr();
+  auto stream = cudfGlobalStreamPool().get_stream();
+  // Scalars/literals created here flow into output-facing filter evaluation,
+  // so we keep them on output MR for consistent memory accounting.
+  auto mr = get_output_mr();
 
   switch (filter.kind()) {
     case common::FilterKind::kBigintRange: {
