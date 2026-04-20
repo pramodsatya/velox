@@ -16,12 +16,32 @@
 
 #pragma once
 
-#include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/cudf/expression/CudfExprCtx.h"
+#include "velox/core/Expressions.h"
+#include "velox/type/Type.h"
 
+#include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
 namespace facebook::velox::cudf_velox {
+
+class CudfExpression;
+
+using CudfExpressionEvaluatorCanEvaluate =
+    std::function<bool(const core::TypedExprPtr& expr)>;
+using CudfExpressionEvaluatorCreate =
+    std::function<std::shared_ptr<CudfExpression>(
+        const core::TypedExprPtr& expr,
+        const RowTypePtr& inputRowSchema,
+        CudfExprCtx exprCtx)>;
+
+struct CudfExpressionEvaluatorEntry {
+  int priority;
+  CudfExpressionEvaluatorCanEvaluate canEvaluate;
+  CudfExpressionEvaluatorCreate create;
+};
 
 /// Ensure that built-in expression evaluators are registered.
 void ensureBuiltinExpressionEvaluatorsRegistered();

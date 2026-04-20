@@ -29,7 +29,8 @@ cudf::ast::expression const& createAstTree(
     cudf::ast::tree& tree,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
-    std::vector<PrecomputeInstruction>& precomputeInstructions);
+    std::vector<PrecomputeInstruction>& precomputeInstructions,
+    CudfExprCtx exprCtx);
 
 cudf::ast::expression const& createAstTree(
     const core::TypedExprPtr& expr,
@@ -38,7 +39,8 @@ cudf::ast::expression const& createAstTree(
     const RowTypePtr& leftRowSchema,
     const RowTypePtr& rightRowSchema,
     std::vector<PrecomputeInstruction>& leftPrecomputeInstructions,
-    std::vector<PrecomputeInstruction>& rightPrecomputeInstructions);
+    std::vector<PrecomputeInstruction>& rightPrecomputeInstructions,
+    CudfExprCtx exprCtx);
 
 /// Evaluates an expression tree using cudf AST.
 class ASTExpression : public CudfExpression {
@@ -49,7 +51,8 @@ class ASTExpression : public CudfExpression {
   /// instructions.
   ASTExpression(
       const core::TypedExprPtr& expr,
-      const RowTypePtr& inputRowSchema);
+      const RowTypePtr& inputRowSchema,
+      CudfExprCtx exprCtx);
 
   ColumnOrView eval(
       std::vector<cudf::column_view> inputColumnViews,
@@ -73,6 +76,7 @@ class ASTExpression : public CudfExpression {
   // <dependent_column_index, "instruction", new_column_index>
   std::vector<PrecomputeInstruction> precomputeInstructions_;
   RowTypePtr inputRowSchema_;
+    CudfExprCtx exprCtx_;
 
   friend class JitExpression;
 };

@@ -32,7 +32,8 @@ class JitExpression : public CudfExpression {
   // precompute instructions and stores them
   JitExpression(
       const core::TypedExprPtr& expr,
-      const RowTypePtr& inputRowSchema);
+      const RowTypePtr& inputRowSchema,
+      CudfExprCtx exprCtx);
 
   // Evaluates the expression tree for the given input columns
   ColumnOrView eval(

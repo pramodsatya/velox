@@ -148,16 +148,6 @@ std::unique_ptr<cudf::scalar> makeScalarFromValue(
 
 template <TypeKind Kind>
 static std::unique_ptr<cudf::scalar> createCudfScalar(
-    const velox::VectorPtr& value,
-    std::optional<cudf::type_id> toType = std::nullopt) {
-  using T = typename TypeTraits<Kind>::NativeType;
-  auto vector = value->as<velox::ConstantVector<T>>();
-  return makeScalarFromValue<T>(
-      vector->type(), vector->value(), vector->isNullAt(0), toType);
-}
-
-template <TypeKind Kind>
-static std::unique_ptr<cudf::scalar> createCudfScalar(
     const core::ConstantTypedExpr& value,
     std::optional<cudf::type_id> toType = std::nullopt) {
   using T = typename TypeTraits<Kind>::NativeType;

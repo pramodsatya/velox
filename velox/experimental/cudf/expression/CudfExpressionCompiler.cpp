@@ -22,34 +22,40 @@
 namespace facebook::velox::cudf_velox {
 
 CudfExpressionCompiler::CudfExpressionCompiler(
-    RowTypePtr inputRowSchema,
-    core::QueryCtx* queryCtx,
-    memory::MemoryPool* pool)
-    : schema_(std::move(inputRowSchema)),
-      queryCtx_(queryCtx),
-      pool_(pool) {}
+    const RowTypePtr& inputRowSchema,
+  CudfExprCtx exprCtx)
+  : schema_(inputRowSchema), exprCtx_(exprCtx) {}
 
-std::shared_ptr<CudfExpression> CudfExpressionCompiler::compile(
+std::shared_ptr<CudfExpression> CudfExpressionCompiler::compileImpl(
     const core::TypedExprPtr& expr) {
-  if (pool_) {
-    // Fold constants (e.g. cast-of-literal) at the TypedExpr level so that
-    // evaluator constructors see simple ConstantTypedExpr nodes.  This mirrors
-    // how the CPU expression compilation path optimizes during
-    // ExprCompiler::compile().  queryCtx_ may be nullptr (e.g. connector
-    // context) — expression::optimize() handles that gracefully.
-    optimizedExpr_ = expression::optimize(expr, queryCtx_, pool_);
-  } else {
-    optimizedExpr_ = expr;
-  }
-
   // Select the best evaluator and create the expression.  Each evaluator
   // handles its own sub-tree compilation internally.
-  const auto* best = findBestEvaluator(optimizedExpr_);
+  const auto* best = findBestEvaluator(expr);
   VELOX_CHECK_NOT_NULL(
       best,
       "No cuDF expression evaluator can handle: {}",
-      optimizedExpr_->toString());
-  return best->create(optimizedExpr_, schema_);
+      expr->toString());
+  return best->create(expr, schema_, exprCtx_);
+}
+
+std::shared_ptr<CudfExpression> CudfExpressionCompiler::compile(
+    const core::TypedExprPtr& expr) {
+    // Fold constants (e.g. cast-of-literal) at the TypedExpr level so that
+    // evaluator constructors see simple ConstantTypedExpr nodes.  This mirrors
+    // how the CPU expression compilation path optimizes during
+  // ExprCompiler::compile().
+  const auto compiledExpr =
+      expression::optimize(expr, exprCtx_.queryCtx, exprCtx_.pool);
+  rootOptimizedExpr_ = compiledExpr;
+  return compileImpl(compiledExpr);
+}
+
+std::shared_ptr<CudfExpression> CudfExpressionCompiler::compileSubExpression(
+    const core::TypedExprPtr& expr,
+    const RowTypePtr& inputRowSchema,
+    CudfExprCtx exprCtx) {
+  CudfExpressionCompiler compiler(inputRowSchema, exprCtx);
+  return compiler.compileImpl(expr);
 }
 
 } // namespace facebook::velox::cudf_velox

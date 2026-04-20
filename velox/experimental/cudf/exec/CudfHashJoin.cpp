@@ -415,10 +415,12 @@ void CudfHashJoinProbe::initialize() {
   // Compile the filter expression against the concatenated (probe + build)
   // schema.  The compiler folds constants and resolves evaluator boundaries.
   std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
+    CudfExprCtx exprCtx{
+      operatorCtx_->execCtx()->queryCtx(),
+      operatorCtx_->pool()};
   CudfExpressionCompiler compiler(
       facebook::velox::type::concatRowTypes(filterRowTypes),
-      operatorCtx_->execCtx()->queryCtx(),
-      operatorCtx_->pool());
+      exprCtx);
   filterEvaluator_ = compiler.compile(joinNode_->filter());
 
   // Build a separate cudf::ast::tree for the two-table
@@ -432,7 +434,8 @@ void CudfHashJoinProbe::initialize() {
         buildType_,
         probeType_,
         rightPrecomputeInstructions_,
-        leftPrecomputeInstructions_);
+        leftPrecomputeInstructions_,
+        exprCtx);
   } else {
     createAstTree(
         compiler.optimizedExpr(),
@@ -441,7 +444,8 @@ void CudfHashJoinProbe::initialize() {
         probeType_,
         buildType_,
         leftPrecomputeInstructions_,
-        rightPrecomputeInstructions_);
+        rightPrecomputeInstructions_,
+        exprCtx);
   }
 }
 

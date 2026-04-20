@@ -25,6 +25,7 @@
 
 #include "velox/core/Expressions.h"
 #include "velox/core/ITypedExpr.h"
+#include "velox/common/memory/Memory.h"
 #include "velox/expression/ExprConstants.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/ConstantVector.h"
@@ -380,6 +381,7 @@ struct AstContext {
   const std::vector<RowTypePtr> inputRowSchema;
   const std::vector<std::reference_wrapper<std::vector<PrecomputeInstruction>>>
       precomputeInstructions;
+  CudfExprCtx exprCtx;
   const core::TypedExprPtr rootExpr;
 
   cudf::ast::expression const& pushExprToTree(const core::TypedExprPtr& expr);
@@ -471,12 +473,12 @@ cudf::ast::expression const& AstContext::multipleInputsToPairWise(
 }
 
 /// Materialise a ConstantTypedExpr to a VectorPtr.
-static VectorPtr toConstantVector(const core::TypedExprPtr& expr) {
+static VectorPtr toConstantVector(
+    const core::TypedExprPtr& expr,
+    memory::MemoryPool* pool) {
   VELOX_CHECK(expr->isConstantKind());
   const auto* c = expr->asUnchecked<core::ConstantTypedExpr>();
-  return c->hasValueVector() ? c->valueVector()
-                             : c->toConstantVector(
-                                   memory::memoryManager()->tracePool());
+  return c->hasValueVector() ? c->valueVector() : c->toConstantVector(pool);
 }
 
 /// Pushes an expression into the AST tree and returns a reference to the
@@ -497,7 +499,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     if (sideIdx < 0) {
       sideIdx = 0;
     }
-    auto node = createCudfExpression(expr, inputRowSchema[sideIdx]);
+    auto node = createCudfExpression(expr, inputRowSchema[sideIdx], exprCtx);
     VELOX_CHECK_NOT_NULL(
         node,
         "Failed to compile sub-expression: {}",
@@ -508,7 +510,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
 
   switch (expr->kind()) {
     case core::ExprKind::kConstant: {
-      auto value = toConstantVector(expr);
+      auto value = toConstantVector(expr, exprCtx.pool);
       VELOX_CHECK(value->isConstantEncoding());
 
       // TODO: There is a scalar stream synchronization bug that causes
@@ -571,7 +573,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
         VELOX_CHECK(
             expr->inputs()[1]->isConstantKind(), "IN list must be a constant");
-        auto inListVec = toConstantVector(expr->inputs()[1]);
+        auto inListVec =
+          toConstantVector(expr->inputs()[1], exprCtx.pool);
         VELOX_CHECK_NOT_NULL(inListVec, "ConstantExpr value is null");
 
         auto literals = createLiteralsFromArray(inListVec, scalars);

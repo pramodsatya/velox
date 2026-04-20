@@ -955,7 +955,8 @@ std::string exprRegistryName(const core::TypedExprPtr& expr) {
 
 std::shared_ptr<FunctionExpression> FunctionExpression::create(
     const core::TypedExprPtr& expr,
-    const RowTypePtr& inputRowSchema) {
+  const RowTypePtr& inputRowSchema,
+  CudfExprCtx exprCtx) {
   auto node = std::make_shared<FunctionExpression>();
   node->expr_ = expr;
   node->inputRowSchema_ = inputRowSchema;
@@ -971,7 +972,7 @@ std::shared_ptr<FunctionExpression> FunctionExpression::create(
         // string ops).  Field references are handled as leaf
         // FunctionExpressions.
         node->subexpressions_.push_back(
-            createCudfExpression(input, inputRowSchema));
+            createCudfExpression(input, inputRowSchema, exprCtx));
       }
     }
   }
@@ -1103,12 +1104,12 @@ bool canBeEvaluatedByCudf(const core::TypedExprPtr& expr, bool deep) {
 
 std::shared_ptr<CudfExpression> createCudfExpression(
     const core::TypedExprPtr& expr,
-    const RowTypePtr& inputRowSchema) {
+    const RowTypePtr& inputRowSchema,
+    CudfExprCtx exprCtx) {
   // Delegate to CudfExpressionCompiler which centralizes all evaluator
-  // selection logic.  No QueryCtx/pool available here, so optimization
-  // is skipped.
-  CudfExpressionCompiler compiler(inputRowSchema);
-  return compiler.compile(expr);
+  // selection logic for recursive sub-expression compilation.
+  return CudfExpressionCompiler::compileSubExpression(
+      expr, inputRowSchema, exprCtx);
 }
 
 void unregisterFunctions() {

@@ -39,7 +39,10 @@ class CudfFunctionBaseTest : public velox::functions::test::FunctionBaseTest {
       input, pool_.get(), stream, mr);
     auto typedExpr = test_utils::optimizeTypedExpr(
       exprSet.expr(0)->toSql(), input->rowType(), execCtx_.queryCtx(), &execCtx_);
-    auto filterEvaluator = createCudfExpression(typedExpr, input->rowType());
+    auto filterEvaluator = createCudfExpression(
+        typedExpr,
+        input->rowType(),
+        CudfExprCtx{execCtx_.queryCtx(), pool_.get()});
     auto ownedColumns = cudfTable->release();
     std::vector<cudf::column_view> inputViews;
     inputViews.reserve(ownedColumns.size());

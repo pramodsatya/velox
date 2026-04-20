@@ -66,8 +66,10 @@ void ensureBuiltinExpressionEvaluatorsRegistered() {
       [](const core::TypedExprPtr& expr) {
         return FunctionExpression::canEvaluate(expr);
       },
-      [](const core::TypedExprPtr& expr, const RowTypePtr& row) {
-        return FunctionExpression::create(expr, row);
+      [](const core::TypedExprPtr& expr,
+         const RowTypePtr& row,
+         CudfExprCtx exprCtx) {
+        return FunctionExpression::create(expr, row, exprCtx);
       },
       /*overwrite=*/false);
 

@@ -32,9 +32,15 @@ cudf::ast::expression const& createAstTree(
     cudf::ast::tree& tree,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
-    std::vector<PrecomputeInstruction>& precomputeInstructions) {
+    std::vector<PrecomputeInstruction>& precomputeInstructions,
+    CudfExprCtx exprCtx) {
   AstContext context{
-      tree, scalars, {inputRowSchema}, {precomputeInstructions}, expr};
+      tree,
+      scalars,
+      {inputRowSchema},
+      {precomputeInstructions},
+      exprCtx,
+      expr};
   return context.pushExprToTree(expr);
 }
 
@@ -45,22 +51,30 @@ cudf::ast::expression const& createAstTree(
     const RowTypePtr& leftRowSchema,
     const RowTypePtr& rightRowSchema,
     std::vector<PrecomputeInstruction>& leftPrecomputeInstructions,
-    std::vector<PrecomputeInstruction>& rightPrecomputeInstructions) {
+    std::vector<PrecomputeInstruction>& rightPrecomputeInstructions,
+    CudfExprCtx exprCtx) {
   AstContext context{
       tree,
       scalars,
       {leftRowSchema, rightRowSchema},
       {leftPrecomputeInstructions, rightPrecomputeInstructions},
+      exprCtx,
       expr};
   return context.pushExprToTree(expr);
 }
 
 ASTExpression::ASTExpression(
     const core::TypedExprPtr& expr,
-    const RowTypePtr& inputRowSchema)
-    : expr_(expr), inputRowSchema_(inputRowSchema) {
+    const RowTypePtr& inputRowSchema,
+    CudfExprCtx exprCtx)
+    : expr_(expr), inputRowSchema_(inputRowSchema), exprCtx_(exprCtx) {
   createAstTree(
-      expr, cudfTree_, scalars_, inputRowSchema, precomputeInstructions_);
+      expr,
+      cudfTree_,
+      scalars_,
+      inputRowSchema,
+      precomputeInstructions_,
+      exprCtx_);
 }
 
 void ASTExpression::close() {
@@ -132,8 +146,10 @@ void registerAstEvaluator(int priority) {
       [](const core::TypedExprPtr& expr) {
         return ASTExpression::canEvaluate(expr);
       },
-      [](const core::TypedExprPtr& expr, const RowTypePtr& row) {
-        return std::make_shared<ASTExpression>(expr, row);
+      [](const core::TypedExprPtr& expr,
+         const RowTypePtr& row,
+         CudfExprCtx exprCtx) {
+        return std::make_shared<ASTExpression>(expr, row, exprCtx);
       },
       /*overwrite=*/false);
 }

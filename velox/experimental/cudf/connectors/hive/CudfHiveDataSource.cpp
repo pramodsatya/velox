@@ -132,7 +132,7 @@ CudfHiveDataSource::CudfHiveDataSource(
 
     cudfExpressionEvaluator_ = [&] {
       CudfExpressionCompiler compiler(
-          remainingFilterType_, /*queryCtx=*/nullptr, pool_);
+          remainingFilterType_, CudfExprCtx{nullptr, pool_});
       return compiler.compile(remainingFilter);
     }();
     // TODO(kn): Get column names and subfields from remaining filter and add to

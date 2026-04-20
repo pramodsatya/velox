@@ -16,6 +16,8 @@
 
 #pragma once
 
+#include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
+
 #include "velox/core/Expressions.h"
 #include "velox/expression/FunctionSignature.h"
 #include "velox/type/Type.h"
@@ -112,24 +114,12 @@ class CudfExpression {
 
 using CudfExpressionPtr = std::shared_ptr<CudfExpression>;
 
-using CudfExpressionEvaluatorCanEvaluate =
-    std::function<bool(const core::TypedExprPtr& expr)>;
-using CudfExpressionEvaluatorCreate =
-    std::function<std::shared_ptr<CudfExpression>(
-        const core::TypedExprPtr& expr,
-        const RowTypePtr& inputRowSchema)>;
-
-struct CudfExpressionEvaluatorEntry {
-  int priority;
-  CudfExpressionEvaluatorCanEvaluate canEvaluate;
-  CudfExpressionEvaluatorCreate create;
-};
-
 class FunctionExpression : public CudfExpression {
  public:
   static std::shared_ptr<FunctionExpression> create(
       const core::TypedExprPtr& expr,
-      const RowTypePtr& inputRowSchema);
+  const RowTypePtr& inputRowSchema,
+  CudfExprCtx exprCtx);
 
   ColumnOrView eval(
       std::vector<cudf::column_view> inputColumnViews,
@@ -152,12 +142,13 @@ class FunctionExpression : public CudfExpression {
 };
 
 /// Create a CudfExpression from a TypedExpr, selecting the best evaluator.
-/// Delegates to CudfExpressionCompiler.  Does not optimize the expression
-/// (no QueryCtx/pool available).  Prefer constructing a CudfExpressionCompiler
-/// directly in operator code where QueryCtx and pool are available.
+/// Delegates to CudfExpressionCompiler::compileSubExpression and does not
+/// optimize the expression. Prefer constructing a CudfExpressionCompiler
+/// directly in operator code and calling compile() at top-level entry points.
 std::shared_ptr<CudfExpression> createCudfExpression(
     const core::TypedExprPtr& expr,
-    const RowTypePtr& inputRowSchema);
+  const RowTypePtr& inputRowSchema,
+  CudfExprCtx exprCtx);
 
 /// Lightweight check if an expression tree is supported by any CUDF evaluator
 /// without initializing CudfExpression objects.

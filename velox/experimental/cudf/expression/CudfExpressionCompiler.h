@@ -16,19 +16,17 @@
 
 #pragma once
 
+#include "velox/experimental/cudf/expression/CudfExprCtx.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
-
-namespace facebook::velox::core {
-class QueryCtx;
-} // namespace facebook::velox::core
 
 namespace facebook::velox::cudf_velox {
 
 /// Compiler that transforms TypedExpr trees into CudfExpressions by
 /// selecting the best evaluator for each sub-tree.
 ///
-/// A single compiler instance is constructed per compilation scope (e.g. one
-/// operator initialization) and may be used to compile multiple expressions.
+/// This class is intended for top-level operator compilation scopes
+/// (e.g. operator initialization). Recursive sub-expression compilation should
+/// use createCudfExpression().
 ///
 /// The compile() method:
 ///   1. Optimizes the expression (constant folding / rewrites) when QueryCtx
@@ -36,10 +34,10 @@ namespace facebook::velox::cudf_velox {
 ///   2. Selects the best evaluator for the root expression.
 ///   3. Creates the evaluator.  Each evaluator handles its own sub-tree
 ///      compilation internally (e.g. FunctionExpression recursively calls
-///      createCudfExpression for children, AST calls compileSubExpression).
+///      createCudfExpression for children, AST calls createCudfExpression).
 ///
 /// Usage:
-///   CudfExpressionCompiler compiler(schema, queryCtx, pool);
+///   CudfExpressionCompiler compiler(schema, exprCtx);
 ///   auto filter = compiler.compile(filterExpr);
 ///   auto proj   = compiler.compile(projectExpr);
 class CudfExpressionCompiler {
@@ -47,27 +45,33 @@ class CudfExpressionCompiler {
   /// Construct a compiler for the given input schema.
   ///
   /// @param inputRowSchema  The schema of the input row.
-  /// @param queryCtx        Query context for optimization. May be nullptr to
-  ///                        skip optimization (e.g. test utilities).
-  /// @param pool            Memory pool for optimization. May be nullptr.
+    /// @param exprCtx         Expression compilation context.
   CudfExpressionCompiler(
-      RowTypePtr inputRowSchema,
-      core::QueryCtx* queryCtx = nullptr,
-      memory::MemoryPool* pool = nullptr);
+      const RowTypePtr& inputRowSchema,
+      CudfExprCtx exprCtx);
 
   /// Compile a single expression.
   ///
   /// If queryCtx and pool were provided at construction, the expression is
   /// optimized (constant folding / rewrites) before compilation.  The
-  /// optimized expression is retained and accessible via optimizedExpr().
+  /// optimized root expression is retained and accessible via optimizedExpr().
   std::shared_ptr<CudfExpression> compile(const core::TypedExprPtr& expr);
 
-  /// The optimized expression from the most recent compile() call.
-  /// Callers that need to walk the expression tree after compilation (e.g.
-  /// CudfHashJoin building a two-table AST) should use this rather than the
-  /// original expression to benefit from constant folding.
+  /// Compile a sub-expression without optimization.
+  ///
+  /// This is used by recursive evaluator internals after top-level compile()
+  /// has already optimized the root expression.
+  static std::shared_ptr<CudfExpression> compileSubExpression(
+      const core::TypedExprPtr& expr,
+      const RowTypePtr& inputRowSchema,
+      CudfExprCtx exprCtx);
+
+  /// The optimized expression from the most recent top-level compile() call.
+  ///
+  /// Compatibility note: this API exists for legacy CudfHashJoin usage.
+  /// New code should avoid depending on this stateful accessor.
   const core::TypedExprPtr& optimizedExpr() const {
-    return optimizedExpr_;
+    return rootOptimizedExpr_;
   }
 
   const RowTypePtr& inputRowSchema() const {
@@ -75,12 +79,13 @@ class CudfExpressionCompiler {
   }
 
  private:
-  RowTypePtr schema_;
-  core::QueryCtx* queryCtx_;
-  memory::MemoryPool* pool_;
+  std::shared_ptr<CudfExpression> compileImpl(const core::TypedExprPtr& expr);
 
-  /// The optimized expression from the most recent compile() call.
-  core::TypedExprPtr optimizedExpr_;
+  RowTypePtr schema_;
+  CudfExprCtx exprCtx_;
+
+  /// The optimized expression from the most recent top-level compile() call.
+  core::TypedExprPtr rootOptimizedExpr_;
 };
 
 } // namespace facebook::velox::cudf_velox
