@@ -40,10 +40,6 @@ std::shared_ptr<CudfExpression> CudfExpressionCompiler::compileImpl(
 
 std::shared_ptr<CudfExpression> CudfExpressionCompiler::compile(
     const core::TypedExprPtr& expr) {
-    // Fold constants (e.g. cast-of-literal) at the TypedExpr level so that
-    // evaluator constructors see simple ConstantTypedExpr nodes.  This mirrors
-    // how the CPU expression compilation path optimizes during
-  // ExprCompiler::compile().
   const auto compiledExpr =
       expression::optimize(expr, exprCtx_.queryCtx, exprCtx_.pool);
   rootOptimizedExpr_ = compiledExpr;

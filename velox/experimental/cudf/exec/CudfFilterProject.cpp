@@ -124,7 +124,8 @@ CudfFilterProject::CudfFilterProject(
                   : std::static_pointer_cast<const core::PlanNode>(filter)),
       hasFilter_(filter != nullptr),
       project_(project),
-      filter_(filter) {
+      filter_(filter),
+      exprCtx_{operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()} {
   if (filter_ != nullptr && project_ != nullptr) {
     folly::Synchronized<exec::OperatorStats>& opStats = Operator::stats();
     opStats.withWLock([&](auto& stats) {
@@ -171,9 +172,6 @@ void CudfFilterProject::initialize() {
 
   const auto inputType = project_ ? project_->sources()[0]->outputType()
                                   : filter_->sources()[0]->outputType();
-  CudfExprCtx exprCtx{
-      operatorCtx_->execCtx()->queryCtx(),
-      operatorCtx_->pool()};
 
   // convert to AST
   if (CudfConfig::getInstance().debugEnabled) {
@@ -183,7 +181,7 @@ void CudfFilterProject::initialize() {
       debugPrintTree(expr, 0, LOG(INFO));
     }
   }
-  CudfExpressionCompiler compiler(inputType, exprCtx);
+  CudfExpressionCompiler compiler(inputType, exprCtx_);
   if (hasFilter_) {
     // First expr is Filter, rest are Project.
     filterEvaluator_ = compiler.compile(allExprs.front());
