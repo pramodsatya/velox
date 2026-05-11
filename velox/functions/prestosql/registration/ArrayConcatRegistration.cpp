@@ -38,6 +38,7 @@ inline void registerArrayConcatFunctions(const std::string& prefix) {
       Array<T>,
       Variadic<Array<T>>>({prefix + "concat"});
 }
+
 } // namespace
 
 void registerArrayConcatFunctions(const std::string& prefix) {
@@ -48,6 +49,8 @@ void registerArrayConcatFunctions(const std::string& prefix) {
   registerArrayConcatFunctions<int32_t>(prefix);
   registerArrayConcatFunctions<int64_t>(prefix);
   registerArrayConcatFunctions<int128_t>(prefix);
+  registerArrayConcatFunctions<ShortDecimal<P1, S1>>(prefix);
+  registerArrayConcatFunctions<LongDecimal<P1, S1>>(prefix);
   registerArrayConcatFunctions<float>(prefix);
   registerArrayConcatFunctions<double>(prefix);
   registerArrayConcatFunctions<bool>(prefix);

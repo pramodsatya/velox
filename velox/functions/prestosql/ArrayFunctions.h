@@ -713,7 +713,7 @@ struct ArrayConcatFunction {
       const arg_type<T>& element) {
     out.reserve(array.size() + 1);
     out.add_items(array);
-    out.push_back(element);
+    appendElement(out, element);
   }
 
   void call(
@@ -721,8 +721,19 @@ struct ArrayConcatFunction {
       const arg_type<T>& element,
       const arg_type<Array<T>>& array) {
     out.reserve(array.size() + 1);
-    out.push_back(element);
+    appendElement(out, element);
     out.add_items(array);
+  }
+
+ private:
+  void appendElement(out_type<Array<T>>& out, const arg_type<T>& element) {
+    if constexpr (
+        std::is_same_v<T, ShortDecimal<P1, S1>> ||
+        std::is_same_v<T, LongDecimal<P1, S1>>) {
+      out.add_item() = element;
+    } else {
+      out.push_back(element);
+    }
   }
 };
 

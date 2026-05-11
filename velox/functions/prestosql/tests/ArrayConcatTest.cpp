@@ -204,6 +204,49 @@ TEST_F(ArrayConcatTest, arrayWithElement) {
   testExpression("concat(c0, c1)", {elementVector, arrayVector}, expected);
 }
 
+TEST_F(ArrayConcatTest, decimalArrayWithElement) {
+  const auto shortDecimalType = DECIMAL(10, 1);
+  const auto shortDecimalArray = makeArrayVector<int64_t>(
+      {{10, 20}, {30, 40}, {50}, {60}}, shortDecimalType);
+  const auto shortDecimalElement =
+      makeFlatVector<int64_t>({100, 200, 300, 400}, shortDecimalType);
+  VectorPtr expected;
+
+  expected = makeArrayVector<int64_t>(
+      {{10, 20, 100}, {30, 40, 200}, {50, 300}, {60, 400}},
+      shortDecimalType);
+  testExpression(
+      "concat(c0, c1)",
+      {shortDecimalArray, shortDecimalElement},
+      expected);
+
+  expected = makeArrayVector<int64_t>(
+      {{100, 10, 20}, {200, 30, 40}, {300, 50}, {400, 60}},
+      shortDecimalType);
+  testExpression(
+      "concat(c0, c1)",
+      {shortDecimalElement, shortDecimalArray},
+      expected);
+
+  const auto longDecimalType = DECIMAL(30, 2);
+  const auto longDecimalArray = makeArrayVector<int128_t>(
+      {{10, 20}, {30, 40}, {50}, {60}}, longDecimalType);
+  const auto longDecimalElement =
+      makeFlatVector<int128_t>({100, 200, 300, 400}, longDecimalType);
+
+  expected = makeArrayVector<int128_t>(
+      {{10, 20, 100}, {30, 40, 200}, {50, 300}, {60, 400}},
+      longDecimalType);
+  testExpression(
+      "concat(c0, c1)", {longDecimalArray, longDecimalElement}, expected);
+
+  expected = makeArrayVector<int128_t>(
+      {{100, 10, 20}, {200, 30, 40}, {300, 50}, {400, 60}},
+      longDecimalType);
+  testExpression(
+      "concat(c0, c1)", {longDecimalElement, longDecimalArray}, expected);
+}
+
 TEST_F(ArrayConcatTest, nestedConcat) {
   const auto elementVector = makeFlatVector<int64_t>({11, 22, 33, 44});
   const auto arrayVector = makeArrayVector<int64_t>(
