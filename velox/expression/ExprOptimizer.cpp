@@ -36,7 +36,7 @@ core::TypedExprPtr tryConstantFold(
             exec::tryEvaluateConstantExpression(expr, pool, queryCtx, false)) {
       return std::make_shared<core::ConstantTypedExpr>(results);
     }
-  } catch (VeloxUserError& e) {
+  } catch (VeloxException& e) {
     if (makeFailExpr != nullptr) {
       const auto result = makeFailExpr(e.message(), expr->type());
       VELOX_USER_CHECK(
