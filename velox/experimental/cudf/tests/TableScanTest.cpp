@@ -863,3 +863,128 @@ TEST_F(TableScanTest, lowPrecisionDecimalScan) {
 
   assertQuery(plan, {filePath}, "SELECT * FROM tmp");
 }
+
+// DECIMAL(18, 4) stores as INT64 in parquet, which cuDF reads as DECIMAL64
+// matching Velox's expected type. Verifies the no-cast short-circuit path.
+TEST_F(TableScanTest, lowPrecisionDecimalNoCastPath) {
+  auto rowType = ROW({"d"}, {DECIMAL(18, 4)});
+  auto vector = makeRowVector(
+      {"d"},
+      {makeNullableFlatVector<int64_t>(
+          {123456789012, std::nullopt, -999900000000, 42}, DECIMAL(18, 4))});
+  std::vector<RowVectorPtr> vectors = {vector};
+  auto filePath = TempFilePath::create();
+  writeToFile(filePath->getPath(), vectors);
+  createDuckDbTable(vectors);
+
+  auto assignments =
+      facebook::velox::exec::test::HiveConnectorTestBase::allRegularColumns(
+          rowType);
+  auto plan = PlanBuilder(pool_.get())
+                  .startTableScan()
+                  .connectorId(kCudfHiveConnectorId)
+                  .outputType(rowType)
+                  .dataColumns(rowType)
+                  .assignments(assignments)
+                  .endTableScan()
+                  .planNode();
+
+  assertQuery(plan, {filePath}, "SELECT * FROM tmp");
+}
+
+// A DECIMAL(7, 2) nested inside a ROW or ARRAY is also stored as INT32 by
+// Velox's writer, so cuDF reads it as DECIMAL32. The recursive cast in
+// readNextChunk must normalize nested decimal children.
+TEST_F(TableScanTest, nestedDecimalCast) {
+  auto structType = ROW({"s"}, {ROW({"x", "y"}, {DECIMAL(7, 2), BIGINT()})});
+  auto innerRow = makeRowVector(
+      {"x", "y"},
+      {makeNullableFlatVector<int64_t>(
+           {100, std::nullopt, -2500, 300}, DECIMAL(7, 2)),
+       makeFlatVector<int64_t>({1, 2, 3, 4})});
+  auto structVector = makeRowVector({"s"}, {innerRow});
+
+  auto filePath = TempFilePath::create();
+  auto fs = filesystems::getFileSystem(filePath->getPath(), {});
+  auto writeFile = fs->openFileForWrite(
+      filePath->getPath(),
+      {.shouldCreateParentDirectories = true,
+       .shouldThrowOnFileAlreadyExists = false});
+  auto sink = std::make_unique<dwio::common::WriteFileSink>(
+      std::move(writeFile), filePath->getPath());
+  auto writerPool =
+      rootPool_->addAggregateChild("TableScanTest.NestedDecimalWriter");
+  parquet::WriterOptions options;
+  options.enableStoreDecimalAsInteger = true;
+  parquet::Writer writer(std::move(sink), options, writerPool, structType);
+  writer.write(structVector);
+  writer.close();
+  createDuckDbTable({structVector});
+
+  auto assignments =
+      facebook::velox::exec::test::HiveConnectorTestBase::allRegularColumns(
+          structType);
+  auto plan = PlanBuilder(pool_.get())
+                  .startTableScan()
+                  .connectorId(kCudfHiveConnectorId)
+                  .outputType(structType)
+                  .dataColumns(structType)
+                  .assignments(assignments)
+                  .endTableScan()
+                  .planNode();
+
+  assertQuery(plan, {filePath}, "SELECT * FROM tmp");
+}
+
+// ARRAY(DECIMAL(5, 1)) stored as INT32 in parquet exercises the recursive
+// decimal cast through list child columns.
+TEST_F(TableScanTest, arrayDecimalCast) {
+  auto arrayType = ROW({"a"}, {ARRAY(DECIMAL(5, 1))});
+  auto elements =
+      makeNullableFlatVector<int64_t>({10, 20, std::nullopt, 40, 50, 60},
+          DECIMAL(5, 1));
+  auto offsets = AlignedBuffer::allocate<vector_size_t>(3, pool_.get());
+  auto rawOffsets = offsets->asMutable<vector_size_t>();
+  rawOffsets[0] = 0;
+  rawOffsets[1] = 2;
+  rawOffsets[2] = 4;
+  auto sizes = AlignedBuffer::allocate<vector_size_t>(3, pool_.get());
+  auto rawSizes = sizes->asMutable<vector_size_t>();
+  rawSizes[0] = 2;
+  rawSizes[1] = 2;
+  rawSizes[2] = 2;
+  auto arrayVector = std::make_shared<ArrayVector>(
+      pool_.get(), ARRAY(DECIMAL(5, 1)), nullptr, 3, offsets, sizes, elements);
+  auto vector = makeRowVector({"a"}, {arrayVector});
+
+  auto filePath = TempFilePath::create();
+  auto fs = filesystems::getFileSystem(filePath->getPath(), {});
+  auto writeFile = fs->openFileForWrite(
+      filePath->getPath(),
+      {.shouldCreateParentDirectories = true,
+       .shouldThrowOnFileAlreadyExists = false});
+  auto sink = std::make_unique<dwio::common::WriteFileSink>(
+      std::move(writeFile), filePath->getPath());
+  auto writerPool =
+      rootPool_->addAggregateChild("TableScanTest.ArrayDecimalWriter");
+  parquet::WriterOptions options;
+  options.enableStoreDecimalAsInteger = true;
+  parquet::Writer writer(std::move(sink), options, writerPool, arrayType);
+  writer.write(vector);
+  writer.close();
+  createDuckDbTable({vector});
+
+  auto assignments =
+      facebook::velox::exec::test::HiveConnectorTestBase::allRegularColumns(
+          arrayType);
+  auto plan = PlanBuilder(pool_.get())
+                  .startTableScan()
+                  .connectorId(kCudfHiveConnectorId)
+                  .outputType(arrayType)
+                  .dataColumns(arrayType)
+                  .assignments(assignments)
+                  .endTableScan()
+                  .planNode();
+
+  assertQuery(plan, {filePath}, "SELECT * FROM tmp");
+}

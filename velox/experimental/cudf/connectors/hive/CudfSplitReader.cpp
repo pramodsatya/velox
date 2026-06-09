@@ -18,6 +18,7 @@
 #include "velox/experimental/cudf/connectors/hive/CudfSplitReader.h"
 #include "velox/experimental/cudf/connectors/hive/CudfSplitReaderHelpers.h"
 #include "velox/experimental/cudf/exec/GpuResources.h"
+#include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 
 #include "velox/common/caching/CacheTTLController.h"
 #include "velox/common/time/Timer.h"
@@ -37,6 +38,7 @@
 #include <cudf/io/types.hpp>
 #include <cudf/table/table.hpp>
 #include <cudf/table/table_view.hpp>
+#include <cudf/unary.hpp>
 
 #include <cuda_runtime.h>
 #include <nvtx3/nvtx3.hpp>
@@ -57,6 +59,113 @@ bool isAbfsPath([[maybe_unused]] const std::string_view path) {
 #else
   return false;
 #endif
+}
+
+bool hasDecimalMismatch(
+    const cudf::column_view& col,
+    const TypePtr& veloxType) {
+  if (veloxType->isDecimal()) {
+    return col.type() != veloxToCudfDataType(veloxType);
+  }
+  if (veloxType->kind() == TypeKind::ROW) {
+    const auto numChildren =
+        std::min<size_t>(col.num_children(), veloxType->size());
+    for (size_t i = 0; i < numChildren; ++i) {
+      if (hasDecimalMismatch(col.child(i), veloxType->childAt(i))) {
+        return true;
+      }
+    }
+  } else if (veloxType->kind() == TypeKind::ARRAY) {
+    constexpr int kListChildIndex = 1;
+    if (col.num_children() > kListChildIndex) {
+      return hasDecimalMismatch(
+          col.child(kListChildIndex), veloxType->childAt(0));
+    }
+  }
+  return false;
+}
+
+std::unique_ptr<cudf::column> castDecimalColumn(
+    std::unique_ptr<cudf::column>&& col,
+    const TypePtr& veloxType,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
+  if (veloxType->isDecimal()) {
+    auto expectedType = veloxToCudfDataType(veloxType);
+    if (col->type() != expectedType) {
+      return cudf::cast(col->view(), expectedType, stream, mr);
+    }
+    return std::move(col);
+  }
+
+  if (veloxType->kind() == TypeKind::ROW) {
+    const auto numRows = col->size();
+    const auto nullCount = col->null_count();
+    const auto numChildren =
+        std::min<size_t>(col->num_children(), veloxType->size());
+    auto contents = col->release();
+    for (size_t i = 0; i < numChildren; ++i) {
+      contents.children[i] = castDecimalColumn(
+          std::move(contents.children[i]), veloxType->childAt(i), stream, mr);
+    }
+    return std::make_unique<cudf::column>(
+        cudf::data_type{cudf::type_id::STRUCT},
+        numRows,
+        std::move(*contents.data),
+        std::move(*contents.null_mask),
+        nullCount,
+        std::move(contents.children));
+  }
+
+  if (veloxType->kind() == TypeKind::ARRAY) {
+    constexpr int kListChildIndex = 1;
+    const auto numRows = col->size();
+    const auto nullCount = col->null_count();
+    if (col->num_children() > kListChildIndex) {
+      auto contents = col->release();
+      contents.children[kListChildIndex] = castDecimalColumn(
+          std::move(contents.children[kListChildIndex]),
+          veloxType->childAt(0),
+          stream,
+          mr);
+      return std::make_unique<cudf::column>(
+          cudf::data_type{cudf::type_id::LIST},
+          numRows,
+          std::move(*contents.data),
+          std::move(*contents.null_mask),
+          nullCount,
+          std::move(contents.children));
+    }
+  }
+
+  return std::move(col);
+}
+
+std::unique_ptr<cudf::table> castDecimalColumnsToVeloxTypes(
+    std::unique_ptr<cudf::table>&& table,
+    const RowTypePtr& rowType,
+    rmm::cuda_stream_view stream,
+    rmm::device_async_resource_ref mr) {
+  auto tableView = table->view();
+  const auto numColumns =
+      std::min<size_t>(tableView.num_columns(), rowType->size());
+  bool needsCast = false;
+  for (size_t i = 0; i < numColumns; ++i) {
+    if (hasDecimalMismatch(tableView.column(i), rowType->childAt(i))) {
+      needsCast = true;
+      break;
+    }
+  }
+  if (!needsCast) {
+    return std::move(table);
+  }
+
+  auto columns = table->release();
+  for (size_t i = 0; i < numColumns; ++i) {
+    columns[i] =
+        castDecimalColumn(std::move(columns[i]), rowType->childAt(i), stream, mr);
+  }
+  return std::make_unique<cudf::table>(std::move(columns));
 }
 
 } // namespace
@@ -144,6 +253,8 @@ std::optional<std::unique_ptr<cudf::table>> CudfSplitReader::next(
 
 std::optional<std::unique_ptr<cudf::table>> CudfSplitReader::readNextChunk(
     rmm::device_async_resource_ref output_mr) {
+  std::unique_ptr<cudf::table> result;
+
   if (!useExperimentalCudfReader_) {
     // Read table using the regular cudf parquet reader
     VELOX_CHECK_NOT_NULL(splitReader_, "cudf parquet reader not present");
@@ -153,70 +264,74 @@ std::optional<std::unique_ptr<cudf::table>> CudfSplitReader::readNextChunk(
     }
 
     auto tableWithMetadata = splitReader_->read_chunk();
-    return std::move(tableWithMetadata.tbl);
-  }
+    result = std::move(tableWithMetadata.tbl);
+  } else {
+    // Read table using the experimental parquet reader
+    VELOX_CHECK_NOT_NULL(
+        exptSplitReader_, "cuDF hybrid scan reader not present");
+    VELOX_CHECK_NOT_NULL(hybridScanState_, "hybrid scan state not present");
 
-  // Read table using the experimental parquet reader
-  VELOX_CHECK_NOT_NULL(exptSplitReader_, "cuDF hybrid scan reader not present");
-  VELOX_CHECK_NOT_NULL(hybridScanState_, "hybrid scan state not present");
+    std::call_once(*hybridScanState_->isHybridScanSetup_, [&]() {
+      auto rowGroupIndices = exptSplitReader_->all_row_groups(readerOptions_);
 
-  std::call_once(*hybridScanState_->isHybridScanSetup_, [&]() {
-    auto rowGroupIndices = exptSplitReader_->all_row_groups(readerOptions_);
-
-    // Filter row groups using row group byte ranges
-    if (readerOptions_.get_skip_bytes() > 0 or
-        readerOptions_.get_num_bytes().has_value()) {
-      rowGroupIndices = exptSplitReader_->filter_row_groups_with_byte_range(
-          rowGroupIndices, readerOptions_);
-    }
-
-    // Filter row groups using column chunk statistics
-    if (readerOptions_.get_filter().has_value()) {
-      rowGroupIndices = exptSplitReader_->filter_row_groups_with_stats(
-          rowGroupIndices, readerOptions_, stream_);
-    }
-
-    // Get column chunk byte ranges to fetch
-    const auto columnChunkByteRanges =
-        exptSplitReader_->all_column_chunks_byte_ranges(
+      // Filter row groups using row group byte ranges
+      if (readerOptions_.get_skip_bytes() > 0 or
+          readerOptions_.get_num_bytes().has_value()) {
+        rowGroupIndices = exptSplitReader_->filter_row_groups_with_byte_range(
             rowGroupIndices, readerOptions_);
+      }
 
-    // Fetch column chunk byte ranges
-    nvtxRangePush("fetchByteRanges");
+      // Filter row groups using column chunk statistics
+      if (readerOptions_.get_filter().has_value()) {
+        rowGroupIndices = exptSplitReader_->filter_row_groups_with_stats(
+            rowGroupIndices, readerOptions_, stream_);
+      }
 
-    // Tuple containing a vector of device buffers, a vector of device spans
-    // for each input byte range, and a future to wait for all reads to
-    // complete
-    auto ioData = fetchByteRangesAsync(
-        dataSource_, columnChunkByteRanges, stream_, get_temp_mr());
+      // Get column chunk byte ranges to fetch
+      const auto columnChunkByteRanges =
+          exptSplitReader_->all_column_chunks_byte_ranges(
+              rowGroupIndices, readerOptions_);
 
-    // Wait for all pending reads to complete
-    std::get<2>(ioData).wait();
-    nvtxRangePop();
+      // Fetch column chunk byte ranges
+      nvtxRangePush("fetchByteRanges");
 
-    // Save state for hybrid scan reader for future calls to `next()`
-    hybridScanState_->columnChunkBuffers_ = std::move(std::get<0>(ioData));
-    hybridScanState_->columnChunkData_ = std::move(std::get<1>(ioData));
+      // Tuple containing a vector of device buffers, a vector of device spans
+      // for each input byte range, and a future to wait for all reads to
+      // complete
+      auto ioData = fetchByteRangesAsync(
+          dataSource_, columnChunkByteRanges, stream_, get_temp_mr());
 
-    exptSplitReader_->setup_chunking_for_all_columns(
-        cudfHiveConfig_->maxChunkReadLimitSession(
-            connectorQueryCtx_->sessionProperties()),
-        cudfHiveConfig_->maxPassReadLimitSession(
-            connectorQueryCtx_->sessionProperties()),
-        rowGroupIndices,
-        hybridScanState_->columnChunkData_,
-        readerOptions_,
-        stream_,
-        output_mr);
-    // TODO: check remainingFilterExprSet_ flag here to choose mr
-  });
+      // Wait for all pending reads to complete
+      std::get<2>(ioData).wait();
+      nvtxRangePop();
 
-  if (!exptSplitReader_->has_next_table_chunk()) {
-    return std::nullopt;
+      // Save state for hybrid scan reader for future calls to `next()`
+      hybridScanState_->columnChunkBuffers_ = std::move(std::get<0>(ioData));
+      hybridScanState_->columnChunkData_ = std::move(std::get<1>(ioData));
+
+      exptSplitReader_->setup_chunking_for_all_columns(
+          cudfHiveConfig_->maxChunkReadLimitSession(
+              connectorQueryCtx_->sessionProperties()),
+          cudfHiveConfig_->maxPassReadLimitSession(
+              connectorQueryCtx_->sessionProperties()),
+          rowGroupIndices,
+          hybridScanState_->columnChunkData_,
+          readerOptions_,
+          stream_,
+          output_mr);
+      // TODO: check remainingFilterExprSet_ flag here to choose mr
+    });
+
+    if (!exptSplitReader_->has_next_table_chunk()) {
+      return std::nullopt;
+    }
+
+    auto tableWithMetadata = exptSplitReader_->materialize_all_columns_chunk();
+    result = std::move(tableWithMetadata.tbl);
   }
 
-  auto tableWithMetadata = exptSplitReader_->materialize_all_columns_chunk();
-  return std::move(tableWithMetadata.tbl);
+  return castDecimalColumnsToVeloxTypes(
+      std::move(result), outputType_, stream_, output_mr);
 }
 
 void CudfSplitReader::resetSplit() {
