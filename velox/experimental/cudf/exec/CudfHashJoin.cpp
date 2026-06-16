@@ -450,14 +450,15 @@ void CudfHashJoinProbe::initialize() {
   }
 
   // Compile the filter expression against the concatenated (probe + build)
-  // schema. Optimize once at the top level so both the function-mode evaluator
-  // and the two-table AST tree see the same constant-folded form.
+  // schema. Optimize once so the evaluator and the two-table AST tree see the
+  // same constant-folded form.
   std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
-  const auto concatenatedSchema =
-      facebook::velox::type::concatRowTypes(filterRowTypes);
   const auto optimizedFilter = expression::optimize(
       joinNode_->filter(), exprCtx_.queryCtx, exprCtx_.pool);
-  filterEvaluator_ = compile(optimizedFilter, concatenatedSchema, exprCtx_);
+  filterEvaluator_ = compile(
+      optimizedFilter,
+      facebook::velox::type::concatRowTypes(filterRowTypes),
+      exprCtx_);
 
   // Disable AST-based filtering (and force precomputation) if the filter
   // expression contains a type the AST/JIT evaluator can't handle, using the
