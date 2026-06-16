@@ -50,7 +50,7 @@ void registerSparkFunctions(const std::string& prefix) {
         return std::make_shared<sparksql::HashFunction>(expr);
       },
       {FunctionSignatureBuilder()
-           .returnType("bigint")
+           .returnType("integer")
            .constantArgumentType("integer")
            .argumentType("any")
            .build()});

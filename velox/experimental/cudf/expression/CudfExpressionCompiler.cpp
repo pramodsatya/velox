@@ -15,43 +15,32 @@
  */
 
 #include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
+
+#include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
 
 #include "velox/expression/ExprOptimizer.h"
 
 namespace facebook::velox::cudf_velox {
 
-CudfExpressionCompiler::CudfExpressionCompiler(
-    const RowTypePtr& inputRowSchema,
-    CudfExprCtx exprCtx)
-    : schema_(inputRowSchema), exprCtx_(exprCtx) {}
-
-std::shared_ptr<CudfExpression> CudfExpressionCompiler::compileImpl(
-    const core::TypedExprPtr& expr) {
-  // Select the best evaluator and create the expression.  Each evaluator
-  // handles its own sub-tree compilation internally.
-  const auto* best = findBestEvaluator(expr);
-  VELOX_CHECK_NOT_NULL(
-      best,
-      "No cuDF expression evaluator can handle: {}",
-      expr->toString());
-  return best->create(expr, schema_, exprCtx_);
-}
-
-std::shared_ptr<CudfExpression> CudfExpressionCompiler::compile(
-    const core::TypedExprPtr& expr) {
-  const auto compiledExpr =
-      expression::optimize(expr, exprCtx_.queryCtx, exprCtx_.pool);
-  rootOptimizedExpr_ = compiledExpr;
-  return compileImpl(compiledExpr);
-}
-
-std::shared_ptr<CudfExpression> CudfExpressionCompiler::compileSubExpression(
+std::shared_ptr<CudfExpression> compile(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    CudfExprCtx exprCtx) {
-  CudfExpressionCompiler compiler(inputRowSchema, exprCtx);
-  return compiler.compileImpl(expr);
+    const CudfExprCtx& exprCtx) {
+  const auto* best = findBestEvaluator(expr);
+  VELOX_CHECK_NOT_NULL(
+      best, "No cuDF expression evaluator can handle: {}", expr->toString());
+  return best->create(expr, inputRowSchema, exprCtx);
+}
+
+std::shared_ptr<CudfExpression> optimizeAndCompile(
+    const core::TypedExprPtr& expr,
+    const RowTypePtr& inputRowSchema,
+    const CudfExprCtx& exprCtx) {
+  return compile(
+      expression::optimize(expr, exprCtx.queryCtx, exprCtx.pool),
+      inputRowSchema,
+      exprCtx);
 }
 
 } // namespace facebook::velox::cudf_velox

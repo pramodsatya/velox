@@ -18,6 +18,7 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/core/Expressions.h"
 #include "velox/vector/BaseVector.h"
+#include "velox/vector/SimpleVector.h"
 
 #include <cudf/hashing.hpp>
 #include <cudf/table/table.hpp>

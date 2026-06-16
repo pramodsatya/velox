@@ -27,6 +27,7 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/core/Expressions.h"
 #include "velox/core/QueryCtx.h"
+#include "velox/expression/Expr.h"
 #include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 #include "velox/functions/sparksql/registration/Register.h"
 #include "velox/type/Type.h"
@@ -451,13 +452,13 @@ TEST_F(CudfExpressionSelectionTest, signatureArrayAccess) {
   for (const auto& functionName : {"element_at", "subscript", "get"}) {
     SCOPED_TRACE(functionName);
 
-    auto bigintExpr = compileExecExpr(
+    auto bigintExpr = parseAndInferTypedExpr(
         std::string(functionName) + "(arr, idx_bigint)",
         arrayRowType,
         execCtx_.get());
     ASSERT_TRUE(canBeEvaluatedByCudf(bigintExpr, /*deep=*/true));
 
-    auto integerExpr = compileExecExpr(
+    auto integerExpr = parseAndInferTypedExpr(
         std::string(functionName) + "(arr, idx_integer)",
         arrayRowType,
         execCtx_.get());
@@ -472,12 +473,12 @@ TEST_F(CudfExpressionSelectionTest, signatureSparkGetSmallIntegralIndices) {
       {"idx_smallint", SMALLINT()},
   });
 
-  auto tinyintExpr =
-      compileExecExpr("get(arr, idx_tinyint)", arrayRowType, execCtx_.get());
+  auto tinyintExpr = parseAndInferTypedExpr(
+      "get(arr, idx_tinyint)", arrayRowType, execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(tinyintExpr, /*deep=*/true));
 
-  auto smallintExpr =
-      compileExecExpr("get(arr, idx_smallint)", arrayRowType, execCtx_.get());
+  auto smallintExpr = parseAndInferTypedExpr(
+      "get(arr, idx_smallint)", arrayRowType, execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(smallintExpr, /*deep=*/true));
 }
 
@@ -588,17 +589,16 @@ TEST_F(CudfExpressionSelectionTest, constantFoldingStringAllocatesOnCompile) {
 }
 
 // ---------------------------------------------------------------------------
-// CudfExpressionCompiler tests — verify stateful compilation and
-// expression optimization.
+// CudfExpressionCompiler tests — verify the pure-function compilation API
+// and expression optimization.
 // ---------------------------------------------------------------------------
 
 TEST_F(CudfExpressionSelectionTest, compilerPureAstNoBoundaries) {
   // A simple arithmetic expression handled entirely by AST should compile
   // successfully.
-  CudfExpressionCompiler compiler(
-      rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
   auto expr = parseAndInferTypedExpr("a + b", rowType_, execCtx_.get());
-  auto result = compiler.compile(expr);
+  auto result = compile(
+      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
   ASSERT_NE(result, nullptr);
 }
 
@@ -612,57 +612,46 @@ TEST_F(CudfExpressionSelectionTest, compilerFunctionBoundaryInAst) {
       {"names", ARRAY(VARCHAR())},
   });
 
-  CudfExpressionCompiler compiler(
-      arrayType, makeExprCtx(queryCtx_.get(), pool_.get()));
   auto expr = parseAndInferTypedExpr(
       "a + b > cardinality(names)", arrayType, execCtx_.get());
-  auto result = compiler.compile(expr);
+  auto result = compile(
+      expr, arrayType, makeExprCtx(queryCtx_.get(), pool_.get()));
   ASSERT_NE(result, nullptr);
 }
 
-TEST_F(CudfExpressionSelectionTest, compilerMultipleCompileCalls) {
-  // Multiple compile() calls on the same compiler should each produce a
-  // valid expression.
+TEST_F(CudfExpressionSelectionTest, optimizeAndCompile) {
+  // optimizeAndCompile folds constants and compiles in a single call. Covers a
+  // foldable expression and one that spans an evaluator boundary.
   auto arrayType = ROW({
       {"a", BIGINT()},
       {"b", BIGINT()},
       {"names", ARRAY(VARCHAR())},
   });
+  const auto exprCtx = makeExprCtx(queryCtx_.get(), pool_.get());
 
-  CudfExpressionCompiler compiler(
-      arrayType, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto foldable =
+      parseAndInferTypedExpr("a + (1 + 2)", arrayType, execCtx_.get());
+  ASSERT_NE(optimizeAndCompile(foldable, arrayType, exprCtx), nullptr);
 
-  // First expression with mixed evaluators.
-  auto expr1 = parseAndInferTypedExpr(
-      "a > cardinality(names)", arrayType, execCtx_.get());
-  auto result1 = compiler.compile(expr1);
-  ASSERT_NE(result1, nullptr);
-
-  // Second expression — pure AST.
-  auto expr2 = parseAndInferTypedExpr("a + b", arrayType, execCtx_.get());
-  auto result2 = compiler.compile(expr2);
-  ASSERT_NE(result2, nullptr);
-
-  // Third expression with mixed evaluators again.
-  auto expr3 = parseAndInferTypedExpr(
-      "b > cardinality(names)", arrayType, execCtx_.get());
-  auto result3 = compiler.compile(expr3);
-  ASSERT_NE(result3, nullptr);
+  auto mixed = parseAndInferTypedExpr(
+      "a + b > cardinality(names)", arrayType, execCtx_.get());
+  ASSERT_NE(optimizeAndCompile(mixed, arrayType, exprCtx), nullptr);
 }
 
 TEST_F(CudfExpressionSelectionTest, compilerOptimizesConstantExpr) {
-  // Verify that the compiler performs constant folding.
-  // "a + (1 + 2)" should optimize to "a + 3".
-  CudfExpressionCompiler compiler(
-      rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  // expression::optimize folds constant subtrees; "a + (1 + 2)" optimizes to
+  // "a + 3". The data source folds via the ExpressionEvaluator overload (it
+  // has no QueryCtx), so exercise that path here.
+  const auto exprCtx = makeExprCtx(queryCtx_.get(), pool_.get());
   auto expr = parseAndInferTypedExpr("a + (1 + 2)", rowType_, execCtx_.get());
-  auto result = compiler.compile(expr);
+
+  exec::SimpleExpressionEvaluator evaluator(queryCtx_.get(), pool_.get());
+  const auto optimized = expression::optimize(expr, &evaluator);
+  ASSERT_NE(optimized, nullptr);
+
+  auto result = compile(optimized, rowType_, exprCtx);
   ASSERT_NE(result, nullptr);
 
-  // After optimization, the optimizedExpr should differ from input
-  // (constant folding turns (1+2) into 3).
-  const auto& optimized = compiler.optimizedExpr();
-  ASSERT_NE(optimized, nullptr);
   // The optimized tree should have a constant child for the folded value.
   // It should be "a + 3" which has one FieldAccess child and one Constant.
   bool hasConstant = false;
@@ -676,10 +665,9 @@ TEST_F(CudfExpressionSelectionTest, compilerOptimizesConstantExpr) {
 }
 
 TEST_F(CudfExpressionSelectionTest, compilerSimpleExpressionCompiles) {
-  CudfExpressionCompiler compiler(
-      rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
   auto expr = parseAndInferTypedExpr("a + b", rowType_, execCtx_.get());
-  auto result = compiler.compile(expr);
+  auto result = compile(
+      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
   ASSERT_NE(result, nullptr);
 }
 

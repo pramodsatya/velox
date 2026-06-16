@@ -2736,6 +2736,86 @@ bool FunctionExpression::canEvaluate(const core::TypedExprPtr& expr) {
   return false;
 }
 
+std::optional<std::vector<std::string>> extractFieldPath(
+    const core::TypedExprPtr& expr) {
+  if (expr == nullptr) {
+    return std::nullopt;
+  }
+
+  if (expr->isFieldAccessKind()) {
+    const auto* field = expr->asUnchecked<core::FieldAccessTypedExpr>();
+    if (field->inputs().empty() || field->inputs()[0]->isInputKind()) {
+      return std::vector<std::string>{field->name()};
+    }
+
+    auto path = extractFieldPath(field->inputs()[0]);
+    if (!path.has_value()) {
+      return std::nullopt;
+    }
+    path->push_back(field->name());
+    return path;
+  }
+
+  if (expr->isDereferenceKind()) {
+    const auto* dereference = expr->asUnchecked<core::DereferenceTypedExpr>();
+    auto path = extractFieldPath(dereference->inputs()[0]);
+    if (!path.has_value()) {
+      return std::nullopt;
+    }
+    path->push_back(dereference->name());
+    return path;
+  }
+
+  return std::nullopt;
+}
+
+std::optional<std::string> rootFieldName(const core::TypedExprPtr& expr) {
+  auto path = extractFieldPath(expr);
+  if (!path.has_value() || path->empty()) {
+    return std::nullopt;
+  }
+  return path->front();
+}
+
+bool isInputFieldReference(const core::TypedExprPtr& expr) {
+  return rootFieldName(expr).has_value();
+}
+
+void collectReferencedInputFields(
+    const core::TypedExprPtr& expr,
+    std::unordered_set<std::string>& fields,
+    const std::unordered_set<std::string>& lambdaInputs) {
+  if (expr == nullptr) {
+    return;
+  }
+
+  if (auto root = rootFieldName(expr);
+      root.has_value() && !lambdaInputs.count(*root)) {
+    fields.insert(*root);
+  }
+
+  if (expr->isLambdaKind()) {
+    const auto* lambda = expr->asUnchecked<core::LambdaTypedExpr>();
+    auto scopedLambdaInputs = lambdaInputs;
+    for (const auto& name : lambda->signature()->names()) {
+      scopedLambdaInputs.insert(name);
+    }
+    collectReferencedInputFields(lambda->body(), fields, scopedLambdaInputs);
+    return;
+  }
+
+  for (const auto& input : expr->inputs()) {
+    collectReferencedInputFields(input, fields, lambdaInputs);
+  }
+}
+
+std::unordered_set<std::string> referencedInputFields(
+    const core::TypedExprPtr& expr) {
+  std::unordered_set<std::string> fields;
+  collectReferencedInputFields(expr, fields);
+  return fields;
+}
+
 const CudfExpressionEvaluatorEntry* findBestEvaluator(
     const core::TypedExprPtr& expr) {
   ensureBuiltinExpressionEvaluatorsRegistered();
@@ -2798,10 +2878,7 @@ std::shared_ptr<CudfExpression> createCudfExpression(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
     CudfExprCtx exprCtx) {
-  // Delegate to CudfExpressionCompiler which centralizes all evaluator
-  // selection logic for recursive sub-expression compilation.
-  return CudfExpressionCompiler::compileSubExpression(
-      expr, inputRowSchema, exprCtx);
+  return compile(expr, inputRowSchema, exprCtx);
 }
 
 void unregisterFunctions() {

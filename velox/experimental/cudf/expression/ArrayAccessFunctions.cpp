@@ -23,6 +23,7 @@
 #include "velox/core/Expressions.h"
 #include "velox/vector/BaseVector.h"
 #include "velox/vector/ComplexVector.h"
+#include "velox/vector/SimpleVector.h"
 
 #include <cudf/aggregation.hpp>
 #include <cudf/binaryop.hpp>

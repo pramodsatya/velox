@@ -181,24 +181,26 @@ void CudfFilterProject::initialize() {
       debugPrintTree(expr, 0, LOG(INFO));
     }
   }
-  CudfExpressionCompiler compiler(inputType, exprCtx_);
+  // Optimize (rewrites + constant folding) each expression before evaluator
+  // selection so CudfFunctions never see scalar-only operand sets, then
+  // compile.
   if (hasFilter_) {
     // First expr is Filter, rest are Project.
-    filterEvaluator_ = compiler.compile(allExprs.front());
+    filterEvaluator_ = optimizeAndCompile(allExprs.front(), inputType, exprCtx_);
     std::transform(
         allExprs.begin() + 1,
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [&compiler](const core::TypedExprPtr& expr) {
-          return compiler.compile(expr);
+        [&](const core::TypedExprPtr& expr) {
+          return optimizeAndCompile(expr, inputType, exprCtx_);
         });
   } else {
     std::transform(
         allExprs.begin(),
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [&compiler](const core::TypedExprPtr& expr) {
-          return compiler.compile(expr);
+        [&](const core::TypedExprPtr& expr) {
+          return optimizeAndCompile(expr, inputType, exprCtx_);
         });
   }
 

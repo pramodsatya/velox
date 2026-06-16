@@ -273,7 +273,6 @@ bool isOpAndInputsSupported(
 // not special form, name = function, so unsupported for astpure
 // "in", "between", "isnotnull" are not special form, but supported for astpure
 // Check if the expression (name + input types) is supported in AST.
-// Pure TypedExpr-based check, no exec::Expr dependency.
 bool isAstExprSupported(const core::TypedExprPtr& expr) {
   using Op = cudf::ast::ast_operator;
 
@@ -332,19 +331,9 @@ bool isAstExprSupported(const core::TypedExprPtr& expr) {
     const auto name =
         stripPrefix(call->name(), CudfConfig::getInstance().functionNamePrefix);
 
-    // Binary operations
+    // Binary operations.  Velox parsers always lower AND/OR into binary
+    // chains, so a single isOpAndInputsSupported check covers them too.
     if (binaryOps.find(name) != binaryOps.end()) {
-      // AND/OR can handle multiple inputs by chaining
-      if ((name == "and" || name == "or") && len > 2) {
-        for (size_t i = 1; i < len; i++) {
-          if (!isOpAndInputsSupported(
-                  binaryOps.at(name),
-                  {inputCudfDataTypes[0], inputCudfDataTypes[i]})) {
-            return false;
-          }
-        }
-        return true;
-      }
       return len == 2 &&
           isOpAndInputsSupported(binaryOps.at(name), inputCudfDataTypes);
     }
@@ -414,8 +403,6 @@ struct AstContext {
       std::string const& instruction,
       std::string const& fieldName = {},
       const std::shared_ptr<CudfExpression>& node = nullptr);
-  cudf::ast::expression const& multipleInputsToPairWise(
-      const core::TypedExprPtr& expr);
   // Determines which side (0=left, 1=right) an expression references by
   // examining its field references. Returns -1 if no fields found, -2 if spans
   // both sides.
@@ -508,24 +495,6 @@ cudf::ast::expression const& AstContext::addPrecomputeInstruction(
   VELOX_FAIL("Field not found: {}", name);
 }
 
-cudf::ast::expression const& AstContext::multipleInputsToPairWise(
-    const core::TypedExprPtr& expr) {
-  using Operation = cudf::ast::operation;
-
-  VELOX_CHECK(expr->isCallKind());
-  const auto name = stripPrefix(
-      expr->asUnchecked<core::CallTypedExpr>()->name(),
-      CudfConfig::getInstance().functionNamePrefix);
-  auto len = expr->inputs().size();
-  auto result = &pushExprToTree(expr->inputs()[0]);
-
-  for (size_t i = 1; i < len; i++) {
-    auto const& nextInput = pushExprToTree(expr->inputs()[i]);
-    result = &tree.push(Operation{binaryOps.at(name), *result, nextInput});
-  }
-  return *result;
-}
-
 /// Materialise a ConstantTypedExpr to a VectorPtr.
 static VectorPtr toConstantVector(
     const core::TypedExprPtr& expr,
@@ -605,9 +574,6 @@ cudf::ast::expression const& AstContext::pushExprToTree(
           CudfConfig::getInstance().functionNamePrefix);
 
       if (binaryOps.find(name) != binaryOps.end()) {
-        if (name == "and" or name == "or") {
-          return multipleInputsToPairWise(expr);
-        }
         VELOX_CHECK_EQ(len, 2);
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
         auto const& op2 = pushExprToTree(expr->inputs()[1]);

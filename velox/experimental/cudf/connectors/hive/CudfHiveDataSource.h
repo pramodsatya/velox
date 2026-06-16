@@ -125,7 +125,6 @@ class CudfHiveDataSource : public DataSource, public NvtxHelper {
 
   std::unique_ptr<CudfSplitReader> cudfSplitReader_;
 
-  std::unique_ptr<exec::ExprSet> remainingFilterExprSet_;
   std::shared_ptr<velox::cudf_velox::CudfExpression> cudfExpressionEvaluator_;
 
   std::atomic<uint64_t> totalRemainingFilterTime_{0};
