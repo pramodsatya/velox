@@ -71,8 +71,9 @@ core::TypedExprPtr makeCall(
   std::vector<core::TypedExprPtr> inputs;
   inputs.reserve(argTypes.size());
   for (size_t i = 0; i < argTypes.size(); ++i) {
-    inputs.push_back(std::make_shared<core::FieldAccessTypedExpr>(
-        argTypes[i], "c" + std::to_string(i)));
+    inputs.push_back(
+        std::make_shared<core::FieldAccessTypedExpr>(
+            argTypes[i], "c" + std::to_string(i)));
   }
   return std::make_shared<core::CallTypedExpr>(
       returnType, std::move(inputs), name);
@@ -262,8 +263,7 @@ TEST_F(FunctionRegistryTest, canEvaluateMultipleSignatures) {
 // Field access expression, no registry setup. Test that `canEvaluate` returns
 // true without consulting the function registry at all.
 TEST_F(FunctionRegistryTest, canEvaluateFieldReference) {
-  auto fieldExpr =
-      std::make_shared<core::FieldAccessTypedExpr>(DOUBLE(), "c0");
+  auto fieldExpr = std::make_shared<core::FieldAccessTypedExpr>(DOUBLE(), "c0");
   EXPECT_TRUE(FunctionExpression::canEvaluate(fieldExpr));
 }
 

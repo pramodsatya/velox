@@ -16,10 +16,10 @@
 #include "velox/experimental/cudf/exec/Validation.h"
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 #include "velox/experimental/cudf/expression/AstUtils.h"
+#include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
 #include "velox/experimental/cudf/expression/DecimalExpressionKernels.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
-#include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
 
 #include "velox/common/base/Exceptions.h"
 #include "velox/common/memory/Memory.h"
@@ -280,8 +280,7 @@ class SplitFunction : public CudfFunction {
     delimiter_ = constantToString(expr->inputs()[1]);
 
     VELOX_CHECK(
-        expr->inputs()[2]->isConstantKind(),
-        "split limit must be a constant");
+        expr->inputs()[2]->isConstantKind(), "split limit must be a constant");
     maxSplitCount_ = std::stoll(constantToString(expr->inputs()[2]));
 
     // Presto specifies maxSplitCount as the maximum size of the returned array
@@ -330,7 +329,6 @@ class CastFunction : public CudfFunction {
  private:
   cudf::data_type targetCudfType_;
 };
-
 
 class CardinalityFunction : public CudfFunction {
  public:
@@ -387,9 +385,7 @@ class RoundFunction : public CudfFunction {
 
 class BinaryFunction : public CudfFunction {
  public:
-  BinaryFunction(
-      const core::TypedExprPtr& expr,
-      cudf::binary_operator op)
+  BinaryFunction(const core::TypedExprPtr& expr, cudf::binary_operator op)
       : op_(op), type_(cudf_velox::veloxToCudfDataType(expr->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 2, "binary function expects exactly 2 inputs");
@@ -680,9 +676,7 @@ class BinaryFunction : public CudfFunction {
 // enhancements land (Velox PR #17108, see also Velox Issue #17307).
 class LogicalFunction : public CudfFunction {
  public:
-  LogicalFunction(
-      const core::TypedExprPtr& expr,
-      cudf::binary_operator op)
+  LogicalFunction(const core::TypedExprPtr& expr, cudf::binary_operator op)
       : op_(op) {
     VELOX_CHECK_GE(
         expr->inputs().size(), 2, "Logical function expects at least 2 inputs");
@@ -809,9 +803,7 @@ class LogicalFunction : public CudfFunction {
 
 class UnaryFunction : public CudfFunction {
  public:
-  UnaryFunction(
-      const core::TypedExprPtr& expr,
-      cudf::unary_operator op)
+  UnaryFunction(const core::TypedExprPtr& expr, cudf::unary_operator op)
       : op_(op) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 1, "Unary function expects exactly 1 input");
@@ -1005,7 +997,8 @@ class SwitchFunction : public CudfFunction {
         expr->inputs()[0]->type()->kind(),
         TypeKind::BOOLEAN,
         "The switch condition result type should be boolean");
-    VELOX_CHECK(!expr->isConstantKind(), "The condition should not be constant");
+    VELOX_CHECK(
+        !expr->isConstantKind(), "The condition should not be constant");
     if (expr->inputs()[1]->isConstantKind()) {
       left_ = makeScalarFromConstantExpr(expr->inputs()[1]);
     }
@@ -1054,8 +1047,7 @@ class SubstrFunction : public CudfFunction {
     VELOX_CHECK_LE(expr->inputs().size(), 3, "substr expects at most 3 inputs");
 
     VELOX_CHECK(
-        expr->inputs()[1]->isConstantKind(),
-        "substr start must be a constant");
+        expr->inputs()[1]->isConstantKind(), "substr start must be a constant");
     auto startValue = toConstantVector(expr->inputs()[1])
                           ->as<SimpleVector<int64_t>>()
                           ->valueAt(0);
@@ -1355,7 +1347,8 @@ class LikeFunction : public CudfFunction {
     hasEscape_ = expr->inputs().size() == 3;
     if (hasEscape_) {
       VELOX_CHECK(
-          expr->inputs()[2]->isConstantKind(), "like escape must be a constant");
+          expr->inputs()[2]->isConstantKind(),
+          "like escape must be a constant");
       auto escapeValue = toConstantVector(expr->inputs()[2]);
       escapeIsNull_ = escapeValue->isNullAt(0);
       if (!escapeIsNull_) {
@@ -1946,7 +1939,6 @@ std::shared_ptr<CudfFunction> createCudfFunction(
   return nullptr;
 }
 
-
 bool registerBuiltinFunctions(const std::string& prefix) {
   using exec::FunctionSignatureBuilder;
 
@@ -2313,9 +2305,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
 
     registerCudfFunctions(
         aliases,
-        [op](
-            const std::string&,
-            const core::TypedExprPtr& expr) {
+        [op](const std::string&, const core::TypedExprPtr& expr) {
           return std::make_shared<BinaryFunction>(expr, op);
         },
         {FunctionSignatureBuilder()
@@ -2368,9 +2358,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
                                   cudf::binary_operator op) {
     registerCudfFunctions(
         aliases,
-        [op](
-            const std::string&,
-            const core::TypedExprPtr& expr) {
+        [op](const std::string&, const core::TypedExprPtr& expr) {
           return std::make_shared<BinaryFunction>(expr, op);
         },
         comparisonSignatures);
@@ -2400,9 +2388,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
                              cudf::unary_operator op) {
     registerCudfFunctions(
         aliases,
-        [op](
-            const std::string&,
-            const core::TypedExprPtr& expr) {
+        [op](const std::string&, const core::TypedExprPtr& expr) {
           return std::make_shared<UnaryFunction>(expr, op);
         },
         {FunctionSignatureBuilder()
@@ -2870,8 +2856,7 @@ bool canBeEvaluatedByCudf(
   if (queryCtx == nullptr || pool == nullptr) {
     return canBeEvaluatedByCudf(expr, deep);
   }
-  return canBeEvaluatedByCudf(
-      expression::optimize(expr, queryCtx, pool), deep);
+  return canBeEvaluatedByCudf(expression::optimize(expr, queryCtx, pool), deep);
 }
 
 std::shared_ptr<CudfExpression> createCudfExpression(

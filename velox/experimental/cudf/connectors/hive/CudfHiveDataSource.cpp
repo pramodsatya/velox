@@ -123,12 +123,15 @@ CudfHiveDataSource::CudfHiveDataSource(
     }
 
     // TODO: Prune struct columns to the subfields referenced by the remaining
-    // filter; currently the whole column is read even if only one field is used.
+    // filter; currently the whole column is read even if only one field is
+    // used.
 
     // The filter is already optimized above; compile it directly.
     auto const remainingFilterType = getTableRowType();
     cudfExpressionEvaluator_ = compile(
-        optimizedRemainingFilter, remainingFilterType, CudfExprCtx{nullptr, pool_});
+        optimizedRemainingFilter,
+        remainingFilterType,
+        CudfExprCtx{nullptr, pool_});
   }
 
   // Build a combined AST for all subfield filters once. This is query-constant

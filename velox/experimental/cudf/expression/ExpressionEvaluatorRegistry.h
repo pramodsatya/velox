@@ -17,6 +17,7 @@
 #pragma once
 
 #include "velox/experimental/cudf/expression/CudfExprCtx.h"
+
 #include "velox/core/Expressions.h"
 #include "velox/type/Type.h"
 

@@ -25,7 +25,6 @@
 #include "velox/common/memory/Memory.h"
 #include "velox/core/Expressions.h"
 
-
 #include <cudf/aggregation.hpp>
 #include <cudf/reduction.hpp>
 #include <cudf/stream_compaction.hpp>
@@ -186,7 +185,8 @@ void CudfFilterProject::initialize() {
   // compile.
   if (hasFilter_) {
     // First expr is Filter, rest are Project.
-    filterEvaluator_ = optimizeAndCompile(allExprs.front(), inputType, exprCtx_);
+    filterEvaluator_ =
+        optimizeAndCompile(allExprs.front(), inputType, exprCtx_);
     std::transform(
         allExprs.begin() + 1,
         allExprs.end(),

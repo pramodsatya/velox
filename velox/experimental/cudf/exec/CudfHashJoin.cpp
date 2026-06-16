@@ -22,14 +22,13 @@
 #include "velox/experimental/cudf/exec/VeloxCudfInterop.h"
 #include "velox/experimental/cudf/expression/AstExpression.h"
 #include "velox/experimental/cudf/expression/AstExpressionUtils.h"
-#include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
+#include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 
 #include "velox/common/testutil/TestValue.h"
 #include "velox/core/PlanNode.h"
 #include "velox/exec/Task.h" // NOLINT(misc-unused-headers)
 #include "velox/expression/ExprOptimizer.h"
-
 #include "velox/type/TypeUtil.h"
 
 #include <cudf/aggregation.hpp>
@@ -458,8 +457,7 @@ void CudfHashJoinProbe::initialize() {
       facebook::velox::type::concatRowTypes(filterRowTypes);
   const auto optimizedFilter = expression::optimize(
       joinNode_->filter(), exprCtx_.queryCtx, exprCtx_.pool);
-  filterEvaluator_ =
-      compile(optimizedFilter, concatenatedSchema, exprCtx_);
+  filterEvaluator_ = compile(optimizedFilter, concatenatedSchema, exprCtx_);
 
   // Disable AST-based filtering (and force precomputation) if the filter
   // expression contains a type the AST/JIT evaluator can't handle, using the
@@ -509,7 +507,7 @@ void CudfHashJoinProbe::initialize() {
         probeType_,
         rightPrecomputeInstructions_,
         leftPrecomputeInstructions_,
-          exprCtx_);
+        exprCtx_);
   } else {
     createAstTree(
         optimizedFilter,

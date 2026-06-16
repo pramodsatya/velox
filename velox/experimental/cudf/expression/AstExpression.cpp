@@ -35,12 +35,7 @@ cudf::ast::expression const& createAstTree(
     std::vector<PrecomputeInstruction>& precomputeInstructions,
     CudfExprCtx exprCtx) {
   AstContext context{
-      tree,
-      scalars,
-      {inputRowSchema},
-      {precomputeInstructions},
-      exprCtx,
-      expr};
+      tree, scalars, {inputRowSchema}, {precomputeInstructions}, exprCtx, expr};
   return context.pushExprToTree(expr);
 }
 

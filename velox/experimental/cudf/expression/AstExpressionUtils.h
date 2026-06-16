@@ -25,9 +25,9 @@
 // #include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 
+#include "velox/common/memory/Memory.h"
 #include "velox/core/Expressions.h"
 #include "velox/core/ITypedExpr.h"
-#include "velox/common/memory/Memory.h"
 #include "velox/expression/ExprConstants.h"
 #include "velox/vector/ComplexVector.h"
 #include "velox/vector/ConstantVector.h"
@@ -529,9 +529,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     }
     auto node = createCudfExpression(expr, inputRowSchema[sideIdx], exprCtx);
     VELOX_CHECK_NOT_NULL(
-        node,
-        "Failed to compile sub-expression: {}",
-        expr->toString());
+        node, "Failed to compile sub-expression: {}", expr->toString());
     return addPrecomputeInstructionOnSide(
         sideIdx, 0, expr->toString(), "", node);
   };
@@ -608,8 +606,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
         VELOX_CHECK(
             expr->inputs()[1]->isConstantKind(), "IN list must be a constant");
-        auto inListVec =
-          toConstantVector(expr->inputs()[1], exprCtx.pool);
+        auto inListVec = toConstantVector(expr->inputs()[1], exprCtx.pool);
         VELOX_CHECK_NOT_NULL(inListVec, "ConstantExpr value is null");
 
         auto literals = createLiteralsFromArray(inListVec, scalars);

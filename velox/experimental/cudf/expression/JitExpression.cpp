@@ -21,9 +21,9 @@ namespace facebook::velox::cudf_velox {
 
 JitExpression::JitExpression(
     const core::TypedExprPtr& expr,
-  const RowTypePtr& inputRowSchema,
-  CudfExprCtx exprCtx)
-  : expr_{expr, inputRowSchema, exprCtx} {}
+    const RowTypePtr& inputRowSchema,
+    CudfExprCtx exprCtx)
+    : expr_{expr, inputRowSchema, exprCtx} {}
 
 void JitExpression::close() {
   expr_.close();

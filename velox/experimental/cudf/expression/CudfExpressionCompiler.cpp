@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-#include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
-
 #include "velox/experimental/cudf/CudfNoDefaults.h"
+#include "velox/experimental/cudf/expression/CudfExpressionCompiler.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
 
 #include "velox/expression/ExprOptimizer.h"

@@ -67,9 +67,7 @@ bool canExpressionBeEvaluatedByCudf(
     const core::TypedExprPtr& expr,
     exec::DriverCtx* ctx) {
   return canBeEvaluatedByCudf(
-      expr,
-      ctx->task->queryCtx().get(),
-      memory::memoryManager()->tracePool());
+      expr, ctx->task->queryCtx().get(), memory::memoryManager()->tracePool());
 }
 
 } // namespace
