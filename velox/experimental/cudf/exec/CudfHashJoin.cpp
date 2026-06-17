@@ -463,17 +463,6 @@ void CudfHashJoinProbe::initialize() {
     useAstFilter_ = false;
   }
 
-  // Check if the filter expression spans both join sides (e.g., switch
-  // expressions referencing columns from both probe and build). If so, we
-  // cannot use AST-based filtering and must fall back to filterEvaluator_.
-  if (useAstFilter_ &&
-      hasNonAstSubexprSpanningBothSides(
-          optimizedFilter, probeType_, buildType_)) {
-    VLOG(1) << "Filter expression spans both join sides, using "
-               "filterEvaluator_ instead of AST";
-    useAstFilter_ = false;
-  }
-
   // Validate AST filtering for this join type now to avoid run-time error.
   if (joinNode_->isRightSemiFilterJoin() || joinNode_->isLeftSemiFilterJoin() ||
       joinNode_->isAntiJoin()) {
@@ -491,7 +480,14 @@ void CudfHashJoinProbe::initialize() {
       facebook::velox::type::concatRowTypes(filterRowTypes),
       exprCtx);
 
-  if (!useAstFilter_) {
+  // Check if the filter expression spans both join sides (e.g., switch
+  // expressions referencing columns from both probe and build). If so, we
+  // cannot use AST-based filtering and must fall back to filterEvaluator_.
+  if (hasNonAstSubexprSpanningBothSides(
+          optimizedFilter, probeType_, buildType_)) {
+    VLOG(1) << "Filter expression spans both join sides, using "
+               "filterEvaluator_ instead of AST";
+    useAstFilter_ = false;
     return;
   }
 
@@ -501,27 +497,29 @@ void CudfHashJoinProbe::initialize() {
   // and the column locations in that schema translate to column locations
   // in whole tables
 
-  // create ast tree
-  if (joinNode_->isRightJoin() || joinNode_->isRightSemiFilterJoin()) {
-    createAstTree(
-        optimizedFilter,
-        tree_,
-        scalars_,
-        buildType_,
-        probeType_,
-        rightPrecomputeInstructions_,
-        leftPrecomputeInstructions_,
-        exprCtx);
-  } else {
-    createAstTree(
-        optimizedFilter,
-        tree_,
-        scalars_,
-        probeType_,
-        buildType_,
-        leftPrecomputeInstructions_,
-        rightPrecomputeInstructions_,
-        exprCtx);
+  if (useAstFilter_) {
+    // create ast tree
+    if (joinNode_->isRightJoin() || joinNode_->isRightSemiFilterJoin()) {
+      createAstTree(
+          optimizedFilter,
+          tree_,
+          scalars_,
+          buildType_,
+          probeType_,
+          rightPrecomputeInstructions_,
+          leftPrecomputeInstructions_,
+          exprCtx);
+    } else {
+      createAstTree(
+          optimizedFilter,
+          tree_,
+          scalars_,
+          probeType_,
+          buildType_,
+          leftPrecomputeInstructions_,
+          rightPrecomputeInstructions_,
+          exprCtx);
+    }
   }
 }
 
