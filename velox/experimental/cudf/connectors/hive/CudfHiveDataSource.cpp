@@ -107,15 +107,15 @@ CudfHiveDataSource::CudfHiveDataSource(
   // evaluator selection so CudfFunctions never see scalar-only operand sets.
   // Folding goes through the evaluation interface ConnectorQueryCtx provides
   // for pushed down filters, which carries its own query context.
-  const auto optimizedRemainingFilter = remainingFilter
+  optimizedRemainingFilter_ = remainingFilter
       ? expression::optimize(remainingFilter, expressionEvaluator_)
       : nullptr;
-  if (optimizedRemainingFilter) {
+  if (optimizedRemainingFilter_) {
     // Add fields referenced by the filter to the columns to read. Collect from
     // the optimized expression since folding may drop branches and the columns
     // they reference. Read-column order does not affect results: the data
     // source projects its output to the requested output type.
-    for (const auto& name : referencedInputFields(optimizedRemainingFilter)) {
+    for (const auto& name : referencedInputFields(optimizedRemainingFilter_)) {
       if (readColumnSet_.count(name) == 0) {
         readColumnSet_.emplace(name);
         readColumnNames_.emplace_back(name);
@@ -126,10 +126,12 @@ CudfHiveDataSource::CudfHiveDataSource(
     // filter; currently the whole column is read even if only one field is
     // used.
 
-    // The filter is already optimized above; compile it directly.
+    // The filter is already optimized and constant folded above, so compile it
+    // directly. Compilation only materializes constants (using the pool) and
+    // never reads the query context, so a null queryCtx is intentional here.
     auto const remainingFilterType = getTableRowType();
     cudfExpressionEvaluator_ = compile(
-        optimizedRemainingFilter,
+        optimizedRemainingFilter_,
         remainingFilterType,
         CudfExprCtx{nullptr, pool_});
   }
@@ -248,7 +250,7 @@ std::optional<RowVectorPtr> CudfHiveDataSource::next(
   auto stream = cudfSplitReader_->stream();
 
   uint64_t filterTimeUs{0};
-  if (cudfExpressionEvaluator_) {
+  if (optimizedRemainingFilter_) {
     MicrosecondTimer filterTimer(&filterTimeUs);
     auto cudfTableColumns = cudfTable->release();
     std::vector<cudf::column_view> inputViews;

@@ -77,7 +77,8 @@ class CudfFunction {
 
 using CudfFunctionFactory = std::function<std::shared_ptr<CudfFunction>(
     const std::string& name,
-    const core::TypedExprPtr& expr)>;
+    const core::TypedExprPtr& expr,
+    const CudfExprCtx& exprCtx)>;
 
 struct CudfFunctionSpec {
   CudfFunctionFactory factory;
@@ -101,7 +102,8 @@ void registerCudfFunctions(
 /// signature.
 std::shared_ptr<CudfFunction> createCudfFunction(
     const std::string& name,
-    const core::TypedExprPtr& expr);
+    const core::TypedExprPtr& expr,
+    const CudfExprCtx& exprCtx);
 
 bool registerBuiltinFunctions(const std::string& prefix);
 

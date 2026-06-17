@@ -348,7 +348,6 @@ CudfHashJoinProbe::CudfHashJoinProbe(
       joinNode_(joinNode),
       probeType_(joinNode_->sources()[0]->outputType()),
       buildType_(joinNode_->sources()[1]->outputType()),
-      exprCtx_{operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()},
       cudaEvent_(std::make_unique<CudaEvent>(cudaEventDisableTiming)) {
   auto const& leftKeys = joinNode_->leftKeys(); // probe keys
   auto const& rightKeys = joinNode_->rightKeys(); // build keys
@@ -449,16 +448,13 @@ void CudfHashJoinProbe::initialize() {
     return;
   }
 
-  // Compile the filter expression against the concatenated (probe + build)
-  // schema. Optimize once so the evaluator and the two-table AST tree see the
+  CudfExprCtx exprCtx{
+      operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()};
+
+  // Optimize once so the filter evaluator and the two-table AST tree see the
   // same constant-folded form.
-  std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
-  const auto optimizedFilter = expression::optimize(
-      joinNode_->filter(), exprCtx_.queryCtx, exprCtx_.pool);
-  filterEvaluator_ = compile(
-      optimizedFilter,
-      facebook::velox::type::concatRowTypes(filterRowTypes),
-      exprCtx_);
+  const auto optimizedFilter =
+      expression::optimize(joinNode_->filter(), exprCtx.queryCtx, exprCtx.pool);
 
   // Disable AST-based filtering (and force precomputation) if the filter
   // expression contains a type the AST/JIT evaluator can't handle, using the
@@ -486,6 +482,15 @@ void CudfHashJoinProbe::initialize() {
         "AST expression evaluation must be enabled for semi-filter and anti joins.");
   }
 
+  // Create a reusable evaluator for the filter column. This is expensive to
+  // build, and the expression + input schema are stable for the lifetime of
+  // the operator instance.
+  std::vector<velox::RowTypePtr> filterRowTypes{probeType_, buildType_};
+  filterEvaluator_ = compile(
+      optimizedFilter,
+      facebook::velox::type::concatRowTypes(filterRowTypes),
+      exprCtx);
+
   if (!useAstFilter_) {
     return;
   }
@@ -496,9 +501,7 @@ void CudfHashJoinProbe::initialize() {
   // and the column locations in that schema translate to column locations
   // in whole tables
 
-  // Build a separate cudf::ast::tree for the two-table
-  // cudf::filter_join_indices() API, using the per-side schemas.
-  // Unsupported sub-expressions are compiled on-demand by the AST builder.
+  // create ast tree
   if (joinNode_->isRightJoin() || joinNode_->isRightSemiFilterJoin()) {
     createAstTree(
         optimizedFilter,
@@ -508,7 +511,7 @@ void CudfHashJoinProbe::initialize() {
         probeType_,
         rightPrecomputeInstructions_,
         leftPrecomputeInstructions_,
-        exprCtx_);
+        exprCtx);
   } else {
     createAstTree(
         optimizedFilter,
@@ -518,7 +521,7 @@ void CudfHashJoinProbe::initialize() {
         buildType_,
         leftPrecomputeInstructions_,
         rightPrecomputeInstructions_,
-        exprCtx_);
+        exprCtx);
   }
 }
 

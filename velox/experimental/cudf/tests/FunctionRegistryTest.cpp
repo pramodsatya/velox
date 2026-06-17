@@ -52,14 +52,24 @@ class TagFunction : public CudfFunction {
 };
 
 CudfFunctionFactory tagFactory(std::string tag) {
-  return [tag](const std::string&, const core::TypedExprPtr&) {
-    return std::make_shared<TagFunction>(tag);
-  };
+  return
+      [tag](const std::string&, const core::TypedExprPtr&, const CudfExprCtx&) {
+        return std::make_shared<TagFunction>(tag);
+      };
 }
 
 std::string tagOf(const std::shared_ptr<CudfFunction>& fn) {
   auto* tagged = dynamic_cast<TagFunction*>(fn.get());
   return tagged ? tagged->tag() : std::string{"<null>"};
+}
+
+// The tests below exercise registry dispatch with mock TagFunctions that never
+// materialise constants, so they need no query context. This 2-argument
+// overload forwards an empty CudfExprCtx to keep the call sites concise.
+std::shared_ptr<CudfFunction> createCudfFunction(
+    const std::string& name,
+    const core::TypedExprPtr& expr) {
+  return createCudfFunction(name, expr, CudfExprCtx{nullptr, nullptr});
 }
 
 // Synthetic typed call nodes let these tests exercise the cuDF registry without

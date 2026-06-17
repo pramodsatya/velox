@@ -191,7 +191,7 @@ void CudfFilterProject::initialize() {
         allExprs.begin() + 1,
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [&](const core::TypedExprPtr& expr) {
+        [inputType, this](const auto& expr) {
           return optimizeAndCompile(expr, inputType, exprCtx_);
         });
   } else {
@@ -199,7 +199,7 @@ void CudfFilterProject::initialize() {
         allExprs.begin(),
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [&](const core::TypedExprPtr& expr) {
+        [inputType, this](const auto& expr) {
           return optimizeAndCompile(expr, inputType, exprCtx_);
         });
   }

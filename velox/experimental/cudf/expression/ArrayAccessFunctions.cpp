@@ -49,10 +49,11 @@
 namespace facebook::velox::cudf_velox {
 namespace {
 
-int64_t readConstantIntegralValue(const core::ConstantTypedExpr& expr) {
-  const auto vec = expr.hasValueVector()
-      ? expr.valueVector()
-      : expr.toConstantVector(memory::memoryManager()->tracePool());
+int64_t readConstantIntegralValue(
+    const core::ConstantTypedExpr& expr,
+    memory::MemoryPool* pool) {
+  const auto vec =
+      expr.hasValueVector() ? expr.valueVector() : expr.toConstantVector(pool);
   switch (expr.type()->kind()) {
     case TypeKind::TINYINT:
       return vec->as<SimpleVector<int8_t>>()->valueAt(0);
@@ -490,7 +491,10 @@ std::unique_ptr<cudf::column> makeRepeatedArrayColumn(
 // so validation and extraction can stay in one implementation.
 class ArrayAccessFunction : public CudfFunction {
  public:
-  ArrayAccessFunction(const core::TypedExprPtr& expr, ArrayAccessPolicy policy)
+  ArrayAccessFunction(
+      const core::TypedExprPtr& expr,
+      ArrayAccessPolicy policy,
+      const CudfExprCtx& exprCtx)
       : policy_(policy) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 2, "array access expects exactly 2 inputs");
@@ -504,8 +508,7 @@ class ArrayAccessFunction : public CudfFunction {
                 expr->inputs()[0])) {
       constantArrayVector_ = constArrayExpr->hasValueVector()
           ? constArrayExpr->valueVector()
-          : constArrayExpr->toConstantVector(
-                memory::memoryManager()->tracePool());
+          : constArrayExpr->toConstantVector(exprCtx.pool);
     }
 
     // Literal indices are not passed as input columns during evaluation. Cache
@@ -519,9 +522,9 @@ class ArrayAccessFunction : public CudfFunction {
       indexIsLiteral_ = true;
       const auto vec = indexExpr->hasValueVector()
           ? indexExpr->valueVector()
-          : indexExpr->toConstantVector(memory::memoryManager()->tracePool());
+          : indexExpr->toConstantVector(exprCtx.pool);
       if (!vec->isNullAt(0)) {
-        constantIndex_ = readConstantIntegralValue(*indexExpr);
+        constantIndex_ = readConstantIntegralValue(*indexExpr, exprCtx.pool);
       }
     }
   }
@@ -642,8 +645,9 @@ class ArrayAccessFunction : public CudfFunction {
 
 std::shared_ptr<CudfFunction> makeArrayAccessFunction(
     const core::TypedExprPtr& expr,
-    ArrayAccessPolicy policy) {
-  return std::make_shared<ArrayAccessFunction>(expr, policy);
+    ArrayAccessPolicy policy,
+    const CudfExprCtx& exprCtx) {
+  return std::make_shared<ArrayAccessFunction>(expr, policy, exprCtx);
 }
 
 } // namespace facebook::velox::cudf_velox

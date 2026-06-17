@@ -201,7 +201,6 @@ class CudfHashJoinProbe : public CudfOperatorBase {
   RowTypePtr buildType_;
   /** @brief Cached evaluator for post-join filter column */
   std::shared_ptr<CudfExpression> filterEvaluator_;
-  CudfExprCtx exprCtx_;
 
   bool rightPrecomputed_{false};
 

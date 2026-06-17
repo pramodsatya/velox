@@ -24,6 +24,7 @@ namespace facebook::velox::cudf_velox {
 
 std::shared_ptr<CudfFunction> makeArrayAccessFunction(
     const core::TypedExprPtr& expr,
-    ArrayAccessPolicy policy);
+    ArrayAccessPolicy policy,
+    const CudfExprCtx& exprCtx);
 
 } // namespace facebook::velox::cudf_velox
