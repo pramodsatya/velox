@@ -66,11 +66,7 @@ namespace {
 bool canExpressionBeEvaluatedByCudf(
     const core::TypedExprPtr& expr,
     exec::DriverCtx* ctx) {
-  // Constant folding during the capability check needs a leaf pool. Use a
-  // transient one scoped to this check rather than the global trace pool; the
-  // folded expression does not escape canBeEvaluatedByCudf.
-  auto pool = memory::memoryManager()->addLeafPool();
-  return canBeEvaluatedByCudf(expr, ctx->task->queryCtx().get(), pool.get());
+  return canBeEvaluatedByCudf(expr, ctx->task->queryCtx().get());
 }
 
 } // namespace

@@ -2918,12 +2918,16 @@ bool canBeEvaluatedByCudf(const core::TypedExprPtr& expr, bool deep) {
 bool canBeEvaluatedByCudf(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
-    memory::MemoryPool* pool,
     bool deep) {
-  if (queryCtx == nullptr || pool == nullptr) {
+  if (queryCtx == nullptr) {
     return canBeEvaluatedByCudf(expr, deep);
   }
-  return canBeEvaluatedByCudf(expression::optimize(expr, queryCtx, pool), deep);
+  // Optimize (constant fold and rewrite) so the support check sees the same
+  // form the cuDF operators compile. Folding evaluates constant subtrees and
+  // therefore needs a leaf pool; this transient one is scoped to the check.
+  auto pool = memory::memoryManager()->addLeafPool();
+  return canBeEvaluatedByCudf(
+      expression::optimize(expr, queryCtx, pool.get()), deep);
 }
 
 std::shared_ptr<CudfExpression> createCudfExpression(

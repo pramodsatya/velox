@@ -180,7 +180,6 @@ bool canBeEvaluatedByCudf(const core::TypedExprPtr& expr, bool deep = true);
 bool canBeEvaluatedByCudf(
     const core::TypedExprPtr& expr,
     core::QueryCtx* queryCtx,
-    memory::MemoryPool* pool,
     bool deep = true);
 
 /// Return the best CudfExpressionEvaluatorEntry for the given expression,
