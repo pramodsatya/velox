@@ -34,6 +34,10 @@
 #include <variant>
 #include <vector>
 
+namespace facebook::velox::core {
+class QueryCtx;
+} // namespace facebook::velox::core
+
 namespace facebook::velox::cudf_velox {
 
 // Holds either a non-owning cudf::column_view (zero-copy) or an owning
@@ -78,7 +82,7 @@ class CudfFunction {
 using CudfFunctionFactory = std::function<std::shared_ptr<CudfFunction>(
     const std::string& name,
     const core::TypedExprPtr& expr,
-    const CudfExprCtx& exprCtx)>;
+    memory::MemoryPool* pool)>;
 
 struct CudfFunctionSpec {
   CudfFunctionFactory factory;
@@ -103,7 +107,7 @@ void registerCudfFunctions(
 std::shared_ptr<CudfFunction> createCudfFunction(
     const std::string& name,
     const core::TypedExprPtr& expr,
-    const CudfExprCtx& exprCtx);
+    memory::MemoryPool* pool);
 
 bool registerBuiltinFunctions(const std::string& prefix);
 
@@ -128,7 +132,7 @@ class FunctionExpression : public CudfExpression {
   static std::shared_ptr<FunctionExpression> create(
       const core::TypedExprPtr& expr,
       const RowTypePtr& inputRowSchema,
-      CudfExprCtx exprCtx);
+      memory::MemoryPool* pool);
 
   ColumnOrView eval(
       std::vector<cudf::column_view> inputColumnViews,
@@ -167,7 +171,7 @@ class FunctionExpression : public CudfExpression {
 std::shared_ptr<CudfExpression> createCudfExpression(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    CudfExprCtx exprCtx);
+    memory::MemoryPool* pool);
 
 /// Lightweight check if an expression tree is supported by any CUDF evaluator
 /// without initializing CudfExpression objects.

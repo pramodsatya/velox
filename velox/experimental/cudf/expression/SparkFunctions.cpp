@@ -48,8 +48,8 @@ void registerSparkFunctions(const std::string& prefix) {
       prefix + "hash_with_seed",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<sparksql::HashFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<sparksql::HashFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("integer")
@@ -61,8 +61,8 @@ void registerSparkFunctions(const std::string& prefix) {
       prefix + "date_add",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<sparksql::DateAddFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<sparksql::DateAddFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("date")

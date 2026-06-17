@@ -292,14 +292,13 @@ void CudfNestedLoopJoinProbe::initialize() {
     return;
   }
 
-  CudfExprCtx exprCtx{
-      operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()};
+  auto* const pool = operatorCtx_->pool();
 
   // Optimize (rewrites + constant folding) the join condition before building
   // the AST so CudfFunctions never see scalar-only operand sets. This carries
   // over the constant folding the exec::ExprSet used to perform.
   const auto optimizedCondition = expression::optimize(
-      joinNode_->joinCondition(), exprCtx.queryCtx, exprCtx.pool);
+      joinNode_->joinCondition(), operatorCtx_->execCtx()->queryCtx(), pool);
   VELOX_CHECK_NOT_NULL(optimizedCondition);
 
   // Convert Velox typed expression to cuDF AST expression tree.
@@ -313,7 +312,7 @@ void CudfNestedLoopJoinProbe::initialize() {
       buildType_,
       leftPrecomputeInstructions_,
       rightPrecomputeInstructions_,
-      exprCtx);
+      pool);
 
   // Set hasFilter_ only after the AST has been fully built so that a throw
   // from createAstTree() does not leave the operator marked as having a filter

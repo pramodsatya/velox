@@ -275,16 +275,15 @@ void mergeNullSourceNullsIntoResult(
 
 class SplitFunction : public CudfFunction {
  public:
-  SplitFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  SplitFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     VELOX_CHECK(
         expr->inputs()[1]->isConstantKind(),
         "split delimiter must be a constant");
-    delimiter_ = constantToString(expr->inputs()[1], exprCtx.pool);
+    delimiter_ = constantToString(expr->inputs()[1], pool);
 
     VELOX_CHECK(
         expr->inputs()[2]->isConstantKind(), "split limit must be a constant");
-    maxSplitCount_ =
-        std::stoll(constantToString(expr->inputs()[2], exprCtx.pool));
+    maxSplitCount_ = std::stoll(constantToString(expr->inputs()[2], pool));
 
     // Presto specifies maxSplitCount as the maximum size of the returned array
     // while cuDF understands the parameter as how many splits can it perform.
@@ -353,7 +352,7 @@ class CardinalityFunction : public CudfFunction {
 
 class RoundFunction : public CudfFunction {
  public:
-  RoundFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  RoundFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     const auto argSize = expr->inputs().size();
     VELOX_CHECK(argSize >= 1 && argSize <= 2, "round expects 1 or 2 inputs");
     VELOX_CHECK(
@@ -363,7 +362,7 @@ class RoundFunction : public CudfFunction {
       VELOX_CHECK(
           expr->inputs()[1]->isConstantKind(),
           "round scale must be a constant");
-      scale_ = toConstantVector(expr->inputs()[1], exprCtx.pool)
+      scale_ = toConstantVector(expr->inputs()[1], pool)
                    ->as<SimpleVector<int32_t>>()
                    ->valueAt(0);
     }
@@ -391,14 +390,14 @@ class BinaryFunction : public CudfFunction {
   BinaryFunction(
       const core::TypedExprPtr& expr,
       cudf::binary_operator op,
-      const CudfExprCtx& exprCtx)
+      memory::MemoryPool* pool)
       : op_(op), type_(cudf_velox::veloxToCudfDataType(expr->type())) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 2, "binary function expects exactly 2 inputs");
     if (expr->inputs()[0]->isConstantKind()) {
-      left_ = makeScalarFromConstantExpr(expr->inputs()[0], exprCtx.pool);
+      left_ = makeScalarFromConstantExpr(expr->inputs()[0], pool);
     } else if (expr->inputs()[1]->isConstantKind()) {
-      right_ = makeScalarFromConstantExpr(expr->inputs()[1], exprCtx.pool);
+      right_ = makeScalarFromConstantExpr(expr->inputs()[1], pool);
     }
 
     VELOX_CHECK(
@@ -685,7 +684,7 @@ class LogicalFunction : public CudfFunction {
   LogicalFunction(
       const core::TypedExprPtr& expr,
       cudf::binary_operator op,
-      const CudfExprCtx& exprCtx)
+      memory::MemoryPool* pool)
       : op_(op) {
     VELOX_CHECK_GE(
         expr->inputs().size(), 2, "Logical function expects at least 2 inputs");
@@ -697,7 +696,7 @@ class LogicalFunction : public CudfFunction {
             TypeKind::BOOLEAN,
             "Logical function only supports boolean literals");
         auto boolConst =
-            toConstantVector(input, exprCtx.pool)->as<ConstantVector<bool>>();
+            toConstantVector(input, pool)->as<ConstantVector<bool>>();
         VELOX_CHECK_NOT_NULL(boolConst);
         if (!shortCircuitScalar_ && !boolConst->isNullAt(0)) {
           const bool v = boolConst->valueAt(0);
@@ -707,12 +706,11 @@ class LogicalFunction : public CudfFunction {
             // know what the final result must be, although it will still need
             // to be expanded to a column the same size as the input columns. No
             // need to continue capturing literals in that case.
-            shortCircuitScalar_ =
-                makeScalarFromConstantExpr(input, exprCtx.pool);
+            shortCircuitScalar_ = makeScalarFromConstantExpr(input, pool);
             break;
           }
         }
-        literals_.push_back(makeScalarFromConstantExpr(input, exprCtx.pool));
+        literals_.push_back(makeScalarFromConstantExpr(input, pool));
       } else {
         literals_.push_back(nullptr);
       }
@@ -840,7 +838,7 @@ class UnaryFunction : public CudfFunction {
 
 class BetweenFunction : public CudfFunction {
  public:
-  BetweenFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  BetweenFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     // must have exactly three inputs: value, min, max
     VELOX_CHECK_EQ(
         expr->inputs().size(), 3, "Between function expects exactly 3 inputs");
@@ -850,11 +848,11 @@ class BetweenFunction : public CudfFunction {
         "Between function with literal input is not supported");
     if (expr->inputs()[1]->isConstantKind()) {
       // min is a literal
-      minLiteral_ = makeScalarFromConstantExpr(expr->inputs()[1], exprCtx.pool);
+      minLiteral_ = makeScalarFromConstantExpr(expr->inputs()[1], pool);
     }
     if (expr->inputs()[2]->isConstantKind()) {
       // max is a literal
-      maxLiteral_ = makeScalarFromConstantExpr(expr->inputs()[2], exprCtx.pool);
+      maxLiteral_ = makeScalarFromConstantExpr(expr->inputs()[2], pool);
     }
   }
 
@@ -935,7 +933,7 @@ class GreatestLeastFunction : public CudfFunction {
   GreatestLeastFunction(
       const core::TypedExprPtr& expr,
       cudf::binary_operator op,
-      const CudfExprCtx& exprCtx)
+      memory::MemoryPool* pool)
       : op_(op), type_(cudf_velox::veloxToCudfDataType(expr->type())) {
     VELOX_CHECK_GE(
         expr->inputs().size(),
@@ -948,7 +946,7 @@ class GreatestLeastFunction : public CudfFunction {
     size_t columnIndex = 0;
     for (const auto& input : expr->inputs()) {
       if (input->isConstantKind()) {
-        constValues.push_back(toConstantVector(input, exprCtx.pool));
+        constValues.push_back(toConstantVector(input, pool));
       } else {
         order_.push_back(columnIndex++);
       }
@@ -961,7 +959,7 @@ class GreatestLeastFunction : public CudfFunction {
             foldConstantPair, winner->typeKind(), winner, constValues[i], op);
       }
       foldedScalar_ = makeScalarFromConstantExpr(
-          std::make_shared<core::ConstantTypedExpr>(winner), exprCtx.pool);
+          std::make_shared<core::ConstantTypedExpr>(winner), pool);
     }
   }
 
@@ -1002,7 +1000,7 @@ class GreatestLeastFunction : public CudfFunction {
 
 class SwitchFunction : public CudfFunction {
  public:
-  SwitchFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  SwitchFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 3, "case when expects exactly 3 inputs");
     VELOX_CHECK_EQ(
@@ -1012,10 +1010,10 @@ class SwitchFunction : public CudfFunction {
     VELOX_CHECK(
         !expr->isConstantKind(), "The condition should not be constant");
     if (expr->inputs()[1]->isConstantKind()) {
-      left_ = makeScalarFromConstantExpr(expr->inputs()[1], exprCtx.pool);
+      left_ = makeScalarFromConstantExpr(expr->inputs()[1], pool);
     }
     if (expr->inputs()[2]->isConstantKind()) {
-      right_ = makeScalarFromConstantExpr(expr->inputs()[2], exprCtx.pool);
+      right_ = makeScalarFromConstantExpr(expr->inputs()[2], pool);
     }
   }
 
@@ -1053,14 +1051,14 @@ class SwitchFunction : public CudfFunction {
 
 class SubstrFunction : public CudfFunction {
  public:
-  SubstrFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  SubstrFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     VELOX_CHECK_GE(
         expr->inputs().size(), 2, "substr expects at least 2 inputs");
     VELOX_CHECK_LE(expr->inputs().size(), 3, "substr expects at most 3 inputs");
 
     VELOX_CHECK(
         expr->inputs()[1]->isConstantKind(), "substr start must be a constant");
-    auto startValue = toConstantVector(expr->inputs()[1], exprCtx.pool)
+    auto startValue = toConstantVector(expr->inputs()[1], pool)
                           ->as<SimpleVector<int64_t>>()
                           ->valueAt(0);
     start_ = static_cast<cudf::size_type>(startValue);
@@ -1075,7 +1073,7 @@ class SubstrFunction : public CudfFunction {
       VELOX_CHECK(
           expr->inputs()[2]->isConstantKind(),
           "substr length must be a constant");
-      auto lengthValue = toConstantVector(expr->inputs()[2], exprCtx.pool)
+      auto lengthValue = toConstantVector(expr->inputs()[2], pool)
                              ->as<SimpleVector<int64_t>>()
                              ->valueAt(0);
       // cuDF uses indices [begin, end).
@@ -1107,7 +1105,7 @@ class SubstrFunction : public CudfFunction {
 
 class CoalesceFunction : public CudfFunction {
  public:
-  CoalesceFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  CoalesceFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     // Storing the first literal that appears in inputs because we don't need to
     // process after that. This is the last fallback.
     numColumnsBeforeLiteral_ = expr->inputs().size();
@@ -1116,7 +1114,7 @@ class CoalesceFunction : public CudfFunction {
       if (input->isConstantKind()) {
         const auto* c = input->asUnchecked<core::ConstantTypedExpr>();
         if (!c->isNull()) {
-          literalScalar_ = makeScalarFromConstantExpr(input, exprCtx.pool);
+          literalScalar_ = makeScalarFromConstantExpr(input, pool);
           numColumnsBeforeLiteral_ = i;
           break;
         }
@@ -1195,7 +1193,7 @@ struct ExtractComponentFactory {
   std::shared_ptr<CudfFunction> operator()(
       const std::string&,
       const core::TypedExprPtr& expr,
-      const CudfExprCtx&) const {
+      memory::MemoryPool*) const {
     return std::make_shared<ExtractComponentFunction>(expr, component);
   }
 };
@@ -1328,14 +1326,14 @@ class UpperFunction : public CudfFunction {
 
 class LikeFunction : public CudfFunction {
  public:
-  LikeFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  LikeFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     VELOX_CHECK(
         expr->inputs().size() == 2 || expr->inputs().size() == 3,
         "like expects 2 or 3 inputs");
 
     if (expr->inputs()[0]->isConstantKind()) {
       inputIsConstant_ = true;
-      auto inputValue = toConstantVector(expr->inputs()[0], exprCtx.pool);
+      auto inputValue = toConstantVector(expr->inputs()[0], pool);
       inputIsNull_ = inputValue->isNullAt(0);
       if (!inputIsNull_) {
         input_ = inputValue->toString(0);
@@ -1344,7 +1342,7 @@ class LikeFunction : public CudfFunction {
 
     if (expr->inputs()[1]->isConstantKind()) {
       patternIsConstant_ = true;
-      auto patternValue = toConstantVector(expr->inputs()[1], exprCtx.pool);
+      auto patternValue = toConstantVector(expr->inputs()[1], pool);
       patternIsNull_ = patternValue->isNullAt(0);
       if (!patternIsNull_) {
         pattern_ = patternValue->toString(0);
@@ -1362,7 +1360,7 @@ class LikeFunction : public CudfFunction {
       VELOX_CHECK(
           expr->inputs()[2]->isConstantKind(),
           "like escape must be a constant");
-      auto escapeValue = toConstantVector(expr->inputs()[2], exprCtx.pool);
+      auto escapeValue = toConstantVector(expr->inputs()[2], pool);
       escapeIsNull_ = escapeValue->isNullAt(0);
       if (!escapeIsNull_) {
         escape_ = escapeValue->toString(0);
@@ -1604,14 +1602,14 @@ class StringPatternPredicateFunction : public CudfFunction {
  public:
   StringPatternPredicateFunction(
       const core::TypedExprPtr& expr,
-      const CudfExprCtx& exprCtx,
+      memory::MemoryPool* pool,
       std::string_view functionName) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 2, "{} expects 2 inputs", functionName);
 
     if (expr->inputs()[0]->isConstantKind()) {
       inputIsConstant_ = true;
-      auto inputValue = toConstantVector(expr->inputs()[0], exprCtx.pool);
+      auto inputValue = toConstantVector(expr->inputs()[0], pool);
       inputIsNull_ = inputValue->isNullAt(0);
       if (!inputIsNull_) {
         input_ = inputValue->toString(0);
@@ -1620,7 +1618,7 @@ class StringPatternPredicateFunction : public CudfFunction {
 
     if (expr->inputs()[1]->isConstantKind()) {
       patternIsConstant_ = true;
-      auto patternValue = toConstantVector(expr->inputs()[1], exprCtx.pool);
+      auto patternValue = toConstantVector(expr->inputs()[1], pool);
       patternIsNull_ = patternValue->isNullAt(0);
       if (!patternIsNull_) {
         pattern_ = patternValue->toString(0);
@@ -1697,8 +1695,8 @@ class StringPatternPredicateFunction : public CudfFunction {
 
 class StartswithFunction : public StringPatternPredicateFunction {
  public:
-  StartswithFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx)
-      : StringPatternPredicateFunction(expr, exprCtx, "startswith") {}
+  StartswithFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool)
+      : StringPatternPredicateFunction(expr, pool, "startswith") {}
 
  protected:
   std::unique_ptr<cudf::column> evaluateMatch(
@@ -1720,8 +1718,8 @@ class StartswithFunction : public StringPatternPredicateFunction {
 
 class EndswithFunction : public StringPatternPredicateFunction {
  public:
-  EndswithFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx)
-      : StringPatternPredicateFunction(expr, exprCtx, "endswith") {}
+  EndswithFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool)
+      : StringPatternPredicateFunction(expr, pool, "endswith") {}
 
  protected:
   std::unique_ptr<cudf::column> evaluateMatch(
@@ -1743,8 +1741,8 @@ class EndswithFunction : public StringPatternPredicateFunction {
 
 class ContainsFunction : public StringPatternPredicateFunction {
  public:
-  ContainsFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx)
-      : StringPatternPredicateFunction(expr, exprCtx, "contains") {}
+  ContainsFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool)
+      : StringPatternPredicateFunction(expr, pool, "contains") {}
 
  protected:
   std::unique_ptr<cudf::column> evaluateMatch(
@@ -1766,15 +1764,14 @@ class ContainsFunction : public StringPatternPredicateFunction {
 
 class ConcatFunction : public CudfFunction {
  public:
-  ConcatFunction(const core::TypedExprPtr& expr, const CudfExprCtx& exprCtx) {
+  ConcatFunction(const core::TypedExprPtr& expr, memory::MemoryPool* pool) {
     numInputs_ = expr->inputs().size();
     VELOX_CHECK_GE(numInputs_, 2, "concat expects at least 2 inputs");
 
     // Scan inputs for literals and store strings in map by input index.
     for (size_t i = 0; i < numInputs_; ++i) {
       if (expr->inputs()[i]->isConstantKind()) {
-        inputIndexToLiteral_[i] =
-            constantToString(expr->inputs()[i], exprCtx.pool);
+        inputIndexToLiteral_[i] = constantToString(expr->inputs()[i], pool);
       }
     }
   }
@@ -1839,7 +1836,7 @@ class RowConstructorFunction : public CudfFunction {
  public:
   RowConstructorFunction(
       const core::TypedExprPtr& expr,
-      const CudfExprCtx& exprCtx) {
+      memory::MemoryPool* pool) {
     VELOX_CHECK_GE(
         expr->inputs().size(), 1, "row_constructor expects at least 1 input");
     numInputs_ = expr->inputs().size();
@@ -1847,7 +1844,7 @@ class RowConstructorFunction : public CudfFunction {
     literals_.reserve(numInputs_);
     for (const auto& input : expr->inputs()) {
       if (input->isConstantKind()) {
-        literals_.push_back(makeScalarFromConstantExpr(input, exprCtx.pool));
+        literals_.push_back(makeScalarFromConstantExpr(input, pool));
       } else {
         hasNonLiteralInput = true;
         literals_.push_back(nullptr);
@@ -1939,7 +1936,7 @@ void registerCudfFunctions(
 std::shared_ptr<CudfFunction> createCudfFunction(
     const std::string& name,
     const core::TypedExprPtr& expr,
-    const CudfExprCtx& exprCtx) {
+    memory::MemoryPool* pool) {
   auto& registry = getCudfFunctionRegistry();
   auto it = registry.find(name);
   if (it == registry.end()) {
@@ -1952,7 +1949,7 @@ std::shared_ptr<CudfFunction> createCudfFunction(
         !matchCallAgainstSignatures(expr, spec.signatures)) {
       continue;
     }
-    return spec.factory(name, expr, exprCtx);
+    return spec.factory(name, expr, pool);
   }
   return nullptr;
 }
@@ -1964,8 +1961,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "split",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<SplitFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<SplitFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("array(varchar)")
@@ -1987,7 +1984,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "cardinality",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) {
+         memory::MemoryPool*) {
         return std::make_shared<CardinalityFunction>(expr);
       },
       {FunctionSignatureBuilder()
@@ -1999,8 +1996,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {prefix + "substr", prefix + "substring"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<SubstrFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<SubstrFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("varchar")
@@ -2019,8 +2016,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       "coalesce",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<CoalesceFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<CoalesceFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .typeVariable("T")
@@ -2034,8 +2031,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       "row_constructor",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<RowConstructorFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<RowConstructorFunction>(expr, pool);
       },
       {});
 
@@ -2043,9 +2040,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       "and",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
+         memory::MemoryPool* pool) {
         return std::make_shared<LogicalFunction>(
-            expr, cudf::binary_operator::NULL_LOGICAL_AND, exprCtx);
+            expr, cudf::binary_operator::NULL_LOGICAL_AND, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2057,9 +2054,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       "or",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
+         memory::MemoryPool* pool) {
         return std::make_shared<LogicalFunction>(
-            expr, cudf::binary_operator::NULL_LOGICAL_OR, exprCtx);
+            expr, cudf::binary_operator::NULL_LOGICAL_OR, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2071,8 +2068,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "round",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<RoundFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<RoundFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .integerVariable("p")
@@ -2158,7 +2155,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {prefix + "doy", prefix + "day_of_year"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) {
+         memory::MemoryPool*) {
         return std::make_shared<DayOfYearFunction>(expr);
       },
       timestampDateIntegerSignatures);
@@ -2167,14 +2164,14 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {prefix + "week", prefix + "week_of_year"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) { return std::make_shared<WeekFunction>(expr); },
+         memory::MemoryPool*) { return std::make_shared<WeekFunction>(expr); },
       timestampDateIntegerSignatures);
 
   registerCudfFunction(
       prefix + "quarter",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) {
+         memory::MemoryPool*) {
         return std::make_shared<QuarterFunction>(expr);
       },
       timestampDateIntegerSignatures);
@@ -2183,7 +2180,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {prefix + "yow", prefix + "year_of_week"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) {
+         memory::MemoryPool*) {
         return std::make_shared<YearOfWeekFunction>(expr);
       },
       timestampDateIntegerSignatures);
@@ -2212,7 +2209,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "length",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) { return std::make_shared<LengthFunction>(expr); },
+         memory::MemoryPool*) {
+        return std::make_shared<LengthFunction>(expr);
+      },
       {FunctionSignatureBuilder()
            .returnType("bigint")
            .argumentType("varchar")
@@ -2222,7 +2221,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "lower",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) { return std::make_shared<LowerFunction>(expr); },
+         memory::MemoryPool*) { return std::make_shared<LowerFunction>(expr); },
       {FunctionSignatureBuilder()
            .returnType("varchar")
            .argumentType("varchar")
@@ -2232,7 +2231,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "upper",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) { return std::make_shared<UpperFunction>(expr); },
+         memory::MemoryPool*) { return std::make_shared<UpperFunction>(expr); },
       {FunctionSignatureBuilder()
            .returnType("varchar")
            .argumentType("varchar")
@@ -2242,8 +2241,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "like",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<LikeFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<LikeFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2261,8 +2260,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "startswith",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<StartswithFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<StartswithFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2274,8 +2273,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "endswith",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<EndswithFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<EndswithFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2287,8 +2286,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "contains",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<ContainsFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<ContainsFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("boolean")
@@ -2300,8 +2299,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "concat",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<ConcatFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<ConcatFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("varchar")
@@ -2314,8 +2313,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {"switch", "if"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<SwitchFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<SwitchFunction>(expr, pool);
       },
       {FunctionSignatureBuilder()
            .typeVariable("T")
@@ -2330,7 +2329,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       {"try_cast", "cast"},
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx&) { return std::make_shared<CastFunction>(expr); },
+         memory::MemoryPool*) { return std::make_shared<CastFunction>(expr); },
       {
           // Cast needs special handling dynamically using cudf.
       });
@@ -2360,8 +2359,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
         [op](
             const std::string&,
             const core::TypedExprPtr& expr,
-            const CudfExprCtx& exprCtx) {
-          return std::make_shared<BinaryFunction>(expr, op, exprCtx);
+            memory::MemoryPool* pool) {
+          return std::make_shared<BinaryFunction>(expr, op, pool);
         },
         {FunctionSignatureBuilder()
              .returnType("double")
@@ -2416,8 +2415,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
         [op](
             const std::string&,
             const core::TypedExprPtr& expr,
-            const CudfExprCtx& exprCtx) {
-          return std::make_shared<BinaryFunction>(expr, op, exprCtx);
+            memory::MemoryPool* pool) {
+          return std::make_shared<BinaryFunction>(expr, op, pool);
         },
         comparisonSignatures);
   };
@@ -2449,7 +2448,7 @@ bool registerBuiltinFunctions(const std::string& prefix) {
         [op](
             const std::string&,
             const core::TypedExprPtr& expr,
-            const CudfExprCtx&) {
+            memory::MemoryPool*) {
           return std::make_shared<UnaryFunction>(expr, op);
         },
         {FunctionSignatureBuilder()
@@ -2510,8 +2509,8 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "between",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
-        return std::make_shared<BetweenFunction>(expr, exprCtx);
+         memory::MemoryPool* pool) {
+        return std::make_shared<BetweenFunction>(expr, pool);
       },
       betweenSignatures);
 
@@ -2523,9 +2522,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "greatest",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
+         memory::MemoryPool* pool) {
         return std::make_shared<GreatestLeastFunction>(
-            expr, cudf::binary_operator::NULL_MAX, exprCtx);
+            expr, cudf::binary_operator::NULL_MAX, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("double")
@@ -2544,9 +2543,9 @@ bool registerBuiltinFunctions(const std::string& prefix) {
       prefix + "least",
       [](const std::string&,
          const core::TypedExprPtr& expr,
-         const CudfExprCtx& exprCtx) {
+         memory::MemoryPool* pool) {
         return std::make_shared<GreatestLeastFunction>(
-            expr, cudf::binary_operator::NULL_MIN, exprCtx);
+            expr, cudf::binary_operator::NULL_MIN, pool);
       },
       {FunctionSignatureBuilder()
            .returnType("double")
@@ -2587,13 +2586,13 @@ std::string exprRegistryName(const core::TypedExprPtr& expr) {
 std::shared_ptr<FunctionExpression> FunctionExpression::create(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    CudfExprCtx exprCtx) {
+    memory::MemoryPool* pool) {
   auto node = std::make_shared<FunctionExpression>();
   node->expr_ = expr;
   node->inputRowSchema_ = inputRowSchema;
 
   auto name = exprRegistryName(expr);
-  node->function_ = createCudfFunction(name, expr, exprCtx);
+  node->function_ = createCudfFunction(name, expr, pool);
 
   // For nested field accesses on computed ROW values (e.g. dereferencing the
   // result of row_constructor), pre-resolve the child index inside the parent
@@ -2631,7 +2630,7 @@ std::shared_ptr<FunctionExpression> FunctionExpression::create(
         // string ops).  Field references are handled as leaf
         // FunctionExpressions.
         node->subexpressions_.push_back(
-            createCudfExpression(input, inputRowSchema, exprCtx));
+            createCudfExpression(input, inputRowSchema, pool));
       }
     }
   }
@@ -2933,8 +2932,8 @@ bool canBeEvaluatedByCudf(
 std::shared_ptr<CudfExpression> createCudfExpression(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    CudfExprCtx exprCtx) {
-  return compile(expr, inputRowSchema, exprCtx);
+    memory::MemoryPool* pool) {
+  return compile(expr, inputRowSchema, pool);
 }
 
 void unregisterFunctions() {

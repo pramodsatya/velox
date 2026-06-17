@@ -16,7 +16,6 @@
 
 #pragma once
 
-#include "velox/experimental/cudf/expression/CudfExprCtx.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 
 namespace facebook::velox::cudf_velox {
@@ -29,14 +28,15 @@ namespace facebook::velox::cudf_velox {
 std::shared_ptr<CudfExpression> compile(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    const CudfExprCtx& exprCtx);
+    memory::MemoryPool* pool);
 
-/// Optimizes the expression (rewrites + constant folding through the query
-/// context in `exprCtx`) and compiles the result.  Use for top-level operator
-/// expressions that do not need the optimized tree separately.
+/// Optimizes the expression (rewrites + constant folding through `queryCtx`)
+/// and compiles the result.  Use for top-level operator expressions that do not
+/// need the optimized tree separately.
 std::shared_ptr<CudfExpression> optimizeAndCompile(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    const CudfExprCtx& exprCtx);
+    core::QueryCtx* queryCtx,
+    memory::MemoryPool* pool);
 
 } // namespace facebook::velox::cudf_velox

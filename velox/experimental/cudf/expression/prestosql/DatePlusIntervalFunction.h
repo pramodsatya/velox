@@ -28,7 +28,7 @@ class DatePlusIntervalFunction : public CudfFunction {
  public:
   DatePlusIntervalFunction(
       const core::TypedExprPtr& expr,
-      const CudfExprCtx& exprCtx);
+      memory::MemoryPool* pool);
 
   ColumnOrView eval(
       std::vector<ColumnOrView>& inputColumns,

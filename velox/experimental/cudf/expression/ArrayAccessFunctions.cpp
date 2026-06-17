@@ -494,7 +494,7 @@ class ArrayAccessFunction : public CudfFunction {
   ArrayAccessFunction(
       const core::TypedExprPtr& expr,
       ArrayAccessPolicy policy,
-      const CudfExprCtx& exprCtx)
+      memory::MemoryPool* pool)
       : policy_(policy) {
     VELOX_CHECK_EQ(
         expr->inputs().size(), 2, "array access expects exactly 2 inputs");
@@ -508,7 +508,7 @@ class ArrayAccessFunction : public CudfFunction {
                 expr->inputs()[0])) {
       constantArrayVector_ = constArrayExpr->hasValueVector()
           ? constArrayExpr->valueVector()
-          : constArrayExpr->toConstantVector(exprCtx.pool);
+          : constArrayExpr->toConstantVector(pool);
     }
 
     // Literal indices are not passed as input columns during evaluation. Cache
@@ -522,9 +522,9 @@ class ArrayAccessFunction : public CudfFunction {
       indexIsLiteral_ = true;
       const auto vec = indexExpr->hasValueVector()
           ? indexExpr->valueVector()
-          : indexExpr->toConstantVector(exprCtx.pool);
+          : indexExpr->toConstantVector(pool);
       if (!vec->isNullAt(0)) {
-        constantIndex_ = readConstantIntegralValue(*indexExpr, exprCtx.pool);
+        constantIndex_ = readConstantIntegralValue(*indexExpr, pool);
       }
     }
   }
@@ -646,8 +646,8 @@ class ArrayAccessFunction : public CudfFunction {
 std::shared_ptr<CudfFunction> makeArrayAccessFunction(
     const core::TypedExprPtr& expr,
     ArrayAccessPolicy policy,
-    const CudfExprCtx& exprCtx) {
-  return std::make_shared<ArrayAccessFunction>(expr, policy, exprCtx);
+    memory::MemoryPool* pool) {
+  return std::make_shared<ArrayAccessFunction>(expr, policy, pool);
 }
 
 } // namespace facebook::velox::cudf_velox

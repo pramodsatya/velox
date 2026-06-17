@@ -127,13 +127,10 @@ CudfHiveDataSource::CudfHiveDataSource(
     // used.
 
     // The filter is already optimized and constant folded above, so compile it
-    // directly. Compilation only materializes constants (using the pool) and
-    // never reads the query context, so a null queryCtx is intentional here.
+    // directly.
     auto const remainingFilterType = getTableRowType();
-    cudfExpressionEvaluator_ = compile(
-        optimizedRemainingFilter_,
-        remainingFilterType,
-        CudfExprCtx{nullptr, pool_});
+    cudfExpressionEvaluator_ =
+        compile(optimizedRemainingFilter_, remainingFilterType, pool_);
   }
 
   // Build a combined AST for all subfield filters once. This is query-constant

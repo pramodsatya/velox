@@ -388,7 +388,7 @@ struct AstContext {
   const std::vector<RowTypePtr> inputRowSchema;
   const std::vector<std::reference_wrapper<std::vector<PrecomputeInstruction>>>
       precomputeInstructions;
-  CudfExprCtx exprCtx;
+  memory::MemoryPool* pool;
   const core::TypedExprPtr rootExpr;
 
   cudf::ast::expression const& pushExprToTree(const core::TypedExprPtr& expr);
@@ -527,7 +527,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     if (sideIdx < 0) {
       sideIdx = 0;
     }
-    auto node = createCudfExpression(expr, inputRowSchema[sideIdx], exprCtx);
+    auto node = createCudfExpression(expr, inputRowSchema[sideIdx], pool);
     VELOX_CHECK_NOT_NULL(
         node, "Failed to compile sub-expression: {}", expr->toString());
     return addPrecomputeInstructionOnSide(
@@ -540,7 +540,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
 
   switch (expr->kind()) {
     case core::ExprKind::kConstant: {
-      auto value = toConstantVector(expr, exprCtx.pool);
+      auto value = toConstantVector(expr, pool);
       VELOX_CHECK(value->isConstantEncoding());
 
       // Materialize NULL literals via make_column_from_scalar so the output
@@ -606,7 +606,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
         VELOX_CHECK(
             expr->inputs()[1]->isConstantKind(), "IN list must be a constant");
-        auto inListVec = toConstantVector(expr->inputs()[1], exprCtx.pool);
+        auto inListVec = toConstantVector(expr->inputs()[1], pool);
         VELOX_CHECK_NOT_NULL(inListVec, "ConstantExpr value is null");
 
         auto literals = createLiteralsFromArray(inListVec, scalars);

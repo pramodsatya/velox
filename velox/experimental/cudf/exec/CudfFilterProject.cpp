@@ -123,8 +123,7 @@ CudfFilterProject::CudfFilterProject(
                   : std::static_pointer_cast<const core::PlanNode>(filter)),
       hasFilter_(filter != nullptr),
       project_(project),
-      filter_(filter),
-      exprCtx_{operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()} {
+      filter_(filter) {
   if (filter_ != nullptr && project_ != nullptr) {
     folly::Synchronized<exec::OperatorStats>& opStats = Operator::stats();
     opStats.withWLock([&](auto& stats) {
@@ -183,24 +182,26 @@ void CudfFilterProject::initialize() {
   // Optimize (rewrites + constant folding) each expression before evaluator
   // selection so CudfFunctions never see scalar-only operand sets, then
   // compile.
+  auto* const queryCtx = operatorCtx_->execCtx()->queryCtx();
+  auto* const pool = operatorCtx_->pool();
   if (hasFilter_) {
     // First expr is Filter, rest are Project.
     filterEvaluator_ =
-        optimizeAndCompile(allExprs.front(), inputType, exprCtx_);
+        optimizeAndCompile(allExprs.front(), inputType, queryCtx, pool);
     std::transform(
         allExprs.begin() + 1,
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [inputType, this](const auto& expr) {
-          return optimizeAndCompile(expr, inputType, exprCtx_);
+        [inputType, queryCtx, pool](const auto& expr) {
+          return optimizeAndCompile(expr, inputType, queryCtx, pool);
         });
   } else {
     std::transform(
         allExprs.begin(),
         allExprs.end(),
         std::back_inserter(projectEvaluators_),
-        [inputType, this](const auto& expr) {
-          return optimizeAndCompile(expr, inputType, exprCtx_);
+        [inputType, queryCtx, pool](const auto& expr) {
+          return optimizeAndCompile(expr, inputType, queryCtx, pool);
         });
   }
 

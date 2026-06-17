@@ -25,21 +25,20 @@ namespace facebook::velox::cudf_velox {
 std::shared_ptr<CudfExpression> compile(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    const CudfExprCtx& exprCtx) {
+    memory::MemoryPool* pool) {
   const auto* best = findBestEvaluator(expr);
   VELOX_CHECK_NOT_NULL(
       best, "No cuDF expression evaluator can handle: {}", expr->toString());
-  return best->create(expr, inputRowSchema, exprCtx);
+  return best->create(expr, inputRowSchema, pool);
 }
 
 std::shared_ptr<CudfExpression> optimizeAndCompile(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    const CudfExprCtx& exprCtx) {
+    core::QueryCtx* queryCtx,
+    memory::MemoryPool* pool) {
   return compile(
-      expression::optimize(expr, exprCtx.queryCtx, exprCtx.pool),
-      inputRowSchema,
-      exprCtx);
+      expression::optimize(expr, queryCtx, pool), inputRowSchema, pool);
 }
 
 } // namespace facebook::velox::cudf_velox

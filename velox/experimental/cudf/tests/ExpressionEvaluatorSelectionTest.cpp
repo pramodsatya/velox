@@ -43,12 +43,6 @@ using namespace facebook::velox::cudf_velox::test_utils;
 
 namespace {
 
-static CudfExprCtx makeExprCtx(
-    core::QueryCtx* queryCtx,
-    memory::MemoryPool* pool) {
-  return CudfExprCtx{queryCtx, pool};
-}
-
 class CudfExpressionSelectionTest : public ::testing::Test {
  protected:
   static void SetUpTestCase() {
@@ -101,8 +95,7 @@ TEST_F(CudfExpressionSelectionTest, astRoot) {
   CudfConfig::getInstance().jitExpressionEnabled = true;
   auto expr =
       optimizeTypedExpr("a + c", rowType_, queryCtx_.get(), execCtx_.get());
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
   auto* ast = dynamic_cast<ASTExpression*>(cudfExpr.get());
   auto* jit = dynamic_cast<JitExpression*>(cudfExpr.get());
   ASSERT_TRUE(ast != nullptr || jit != nullptr);
@@ -112,8 +105,7 @@ TEST_F(CudfExpressionSelectionTest, functionRoot) {
   auto expr = optimizeTypedExpr(
       "lower(name)", rowType_, queryCtx_.get(), execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/false));
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
   auto* functionExpr = dynamic_cast<FunctionExpression*>(cudfExpr.get());
   ASSERT_NE(functionExpr, nullptr);
 }
@@ -133,8 +125,7 @@ TEST_F(CudfExpressionSelectionTest, astTopLevelWithFunctionPrecompute) {
       queryCtx_.get(),
       execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/false));
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
   auto* ast = dynamic_cast<ASTExpression*>(cudfExpr.get());
   auto* jit = dynamic_cast<JitExpression*>(cudfExpr.get());
   ASSERT_TRUE(ast != nullptr || jit != nullptr);
@@ -144,8 +135,7 @@ TEST_F(CudfExpressionSelectionTest, functionTopLevelWithNestedFunction) {
   auto expr = optimizeTypedExpr(
       "lower(substr(name, 1, 5))", rowType_, queryCtx_.get(), execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/false));
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
 
   // Top level should be Function
   auto* functionExpr = dynamic_cast<FunctionExpression*>(cudfExpr.get());
@@ -198,8 +188,7 @@ TEST_F(CudfExpressionSelectionTest, nestedRowDereferenceUsesFunctionEvaluator) {
       execCtx_.get());
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/true));
 
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
   auto* functionExpr = dynamic_cast<FunctionExpression*>(cudfExpr.get());
   ASSERT_NE(functionExpr, nullptr);
 }
@@ -220,10 +209,7 @@ TEST_F(
       1);
 
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/true));
-  ASSERT_NE(
-      createCudfExpression(
-          expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get())),
-      nullptr);
+  ASSERT_NE(createCudfExpression(expr, rowType_, pool_.get()), nullptr);
 }
 
 TEST_F(
@@ -242,10 +228,7 @@ TEST_F(
       "right");
 
   ASSERT_TRUE(canBeEvaluatedByCudf(expr, /*deep=*/true));
-  ASSERT_NE(
-      createCudfExpression(
-          expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get())),
-      nullptr);
+  ASSERT_NE(createCudfExpression(expr, rowType_, pool_.get()), nullptr);
 }
 
 // Disabled because this test segfaults in CI while building the typed
@@ -257,8 +240,7 @@ TEST_F(CudfExpressionSelectionTest, DISABLED_functionTopLevelWithNestedAst) {
       queryCtx_.get(),
       execCtx_.get(),
       {.parseIntegerAsBigint = false, .functionPrefix = ""});
-  auto cudfExpr = createCudfExpression(
-      expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto cudfExpr = createCudfExpression(expr, rowType_, pool_.get());
   auto* functionExpr = dynamic_cast<FunctionExpression*>(cudfExpr.get());
   ASSERT_NE(functionExpr, nullptr);
 }
@@ -602,8 +584,7 @@ TEST_F(CudfExpressionSelectionTest, compilerPureAstNoBoundaries) {
   // A simple arithmetic expression handled entirely by AST should compile
   // successfully.
   auto expr = parseAndInferTypedExpr("a + b", rowType_, execCtx_.get());
-  auto result =
-      compile(expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto result = compile(expr, rowType_, pool_.get());
   ASSERT_NE(result, nullptr);
 }
 
@@ -619,8 +600,7 @@ TEST_F(CudfExpressionSelectionTest, compilerFunctionBoundaryInAst) {
 
   auto expr = parseAndInferTypedExpr(
       "a + b > cardinality(names)", arrayType, execCtx_.get());
-  auto result =
-      compile(expr, arrayType, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto result = compile(expr, arrayType, pool_.get());
   ASSERT_NE(result, nullptr);
 }
 
@@ -632,29 +612,30 @@ TEST_F(CudfExpressionSelectionTest, optimizeAndCompile) {
       {"b", BIGINT()},
       {"names", ARRAY(VARCHAR())},
   });
-  const auto exprCtx = makeExprCtx(queryCtx_.get(), pool_.get());
-
   auto foldable =
       parseAndInferTypedExpr("a + (1 + 2)", arrayType, execCtx_.get());
-  ASSERT_NE(optimizeAndCompile(foldable, arrayType, exprCtx), nullptr);
+  ASSERT_NE(
+      optimizeAndCompile(foldable, arrayType, queryCtx_.get(), pool_.get()),
+      nullptr);
 
   auto mixed = parseAndInferTypedExpr(
       "a + b > cardinality(names)", arrayType, execCtx_.get());
-  ASSERT_NE(optimizeAndCompile(mixed, arrayType, exprCtx), nullptr);
+  ASSERT_NE(
+      optimizeAndCompile(mixed, arrayType, queryCtx_.get(), pool_.get()),
+      nullptr);
 }
 
 TEST_F(CudfExpressionSelectionTest, compilerOptimizesConstantExpr) {
   // expression::optimize folds constant subtrees; "a + (1 + 2)" optimizes to
   // "a + 3". The data source folds via the ExpressionEvaluator overload (it
   // has no QueryCtx), so exercise that path here.
-  const auto exprCtx = makeExprCtx(queryCtx_.get(), pool_.get());
   auto expr = parseAndInferTypedExpr("a + (1 + 2)", rowType_, execCtx_.get());
 
   exec::SimpleExpressionEvaluator evaluator(queryCtx_.get(), pool_.get());
   const auto optimized = expression::optimize(expr, &evaluator);
   ASSERT_NE(optimized, nullptr);
 
-  auto result = compile(optimized, rowType_, exprCtx);
+  auto result = compile(optimized, rowType_, pool_.get());
   ASSERT_NE(result, nullptr);
 
   // The optimized tree should have a constant child for the folded value.
@@ -671,8 +652,7 @@ TEST_F(CudfExpressionSelectionTest, compilerOptimizesConstantExpr) {
 
 TEST_F(CudfExpressionSelectionTest, compilerSimpleExpressionCompiles) {
   auto expr = parseAndInferTypedExpr("a + b", rowType_, execCtx_.get());
-  auto result =
-      compile(expr, rowType_, makeExprCtx(queryCtx_.get(), pool_.get()));
+  auto result = compile(expr, rowType_, pool_.get());
   ASSERT_NE(result, nullptr);
 }
 

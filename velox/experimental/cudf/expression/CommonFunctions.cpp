@@ -47,8 +47,8 @@ void registerArrayAccessFunction(
       [policy](
           const std::string&,
           const core::TypedExprPtr& expr,
-          const CudfExprCtx& exprCtx) {
-        return makeArrayAccessFunction(expr, policy, exprCtx);
+          memory::MemoryPool* pool) {
+        return makeArrayAccessFunction(expr, policy, pool);
       },
       signatures);
 }

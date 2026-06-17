@@ -448,13 +448,12 @@ void CudfHashJoinProbe::initialize() {
     return;
   }
 
-  CudfExprCtx exprCtx{
-      operatorCtx_->execCtx()->queryCtx(), operatorCtx_->pool()};
+  auto* const pool = operatorCtx_->pool();
 
   // Optimize once so the filter evaluator and the two-table AST tree see the
   // same constant-folded form.
-  const auto optimizedFilter =
-      expression::optimize(joinNode_->filter(), exprCtx.queryCtx, exprCtx.pool);
+  const auto optimizedFilter = expression::optimize(
+      joinNode_->filter(), operatorCtx_->execCtx()->queryCtx(), pool);
 
   // Disable AST-based filtering (and force precomputation) if the filter
   // expression contains a type the AST/JIT evaluator can't handle, using the
@@ -478,7 +477,7 @@ void CudfHashJoinProbe::initialize() {
   filterEvaluator_ = compile(
       optimizedFilter,
       facebook::velox::type::concatRowTypes(filterRowTypes),
-      exprCtx);
+      pool);
 
   // Check if the filter expression spans both join sides (e.g., switch
   // expressions referencing columns from both probe and build). If so, we
@@ -508,7 +507,7 @@ void CudfHashJoinProbe::initialize() {
           probeType_,
           rightPrecomputeInstructions_,
           leftPrecomputeInstructions_,
-          exprCtx);
+          pool);
     } else {
       createAstTree(
           optimizedFilter,
@@ -518,7 +517,7 @@ void CudfHashJoinProbe::initialize() {
           buildType_,
           leftPrecomputeInstructions_,
           rightPrecomputeInstructions_,
-          exprCtx);
+          pool);
     }
   }
 }

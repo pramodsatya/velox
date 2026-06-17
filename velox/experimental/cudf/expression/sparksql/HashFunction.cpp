@@ -39,7 +39,7 @@ cudf::table_view convertToTableView(std::vector<ColumnOrView>& inputColumns) {
 
 HashFunction::HashFunction(
     const core::TypedExprPtr& expr,
-    const CudfExprCtx& exprCtx) {
+    memory::MemoryPool* pool) {
   VELOX_CHECK_GE(expr->inputs().size(), 2, "hash expects at least 2 inputs");
   VELOX_CHECK(
       expr->inputs()[0]->isConstantKind(), "hash seed must be a constant");
@@ -47,7 +47,7 @@ HashFunction::HashFunction(
       expr->inputs()[0]->asUnchecked<core::ConstantTypedExpr>();
   const auto vec = seedExpr->hasValueVector()
       ? seedExpr->valueVector()
-      : seedExpr->toConstantVector(exprCtx.pool);
+      : seedExpr->toConstantVector(pool);
   int32_t seedValue = vec->as<SimpleVector<int32_t>>()->valueAt(0);
   VELOX_CHECK_GE(seedValue, 0);
   seedValue_ = seedValue;
