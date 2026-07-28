@@ -685,8 +685,9 @@ std::unique_ptr<cudf::scalar> CudfIcebergSplitReader::makeInjectedScalar(
         connectorQueryCtx_->memoryPool(),
         readAsLocalTime,
         isDaysSinceEpoch);
-    return VELOX_DYNAMIC_SCALAR_TYPE_DISPATCH(
-        cudf_velox::createCudfScalar, col.veloxType->kind(), constant);
+    return cudf_velox::makeScalarFromConstantExpr(
+        std::make_shared<core::ConstantTypedExpr>(constant),
+        connectorQueryCtx_->memoryPool());
   } catch (const std::exception& e) {
     VELOX_USER_FAIL(
         "Bad partition value. Column: {}, type: {}, value: {}, error: {}",
