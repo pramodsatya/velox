@@ -47,3 +47,17 @@ target_link_libraries(
   Folly::folly
   Folly::follybenchmark
 )
+
+add_executable(velox_cudf_jit_fusion_benchmark CudfJitFusionBenchmark.cpp)
+
+target_link_libraries(
+  velox_cudf_jit_fusion_benchmark
+  velox_cudf_exec
+  velox_cudf_expression
+  velox_exec
+  velox_functions_prestosql
+  velox_parse_expression
+  velox_parse_parser
+  Folly::folly
+  Folly::follybenchmark
+)

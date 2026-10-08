@@ -10,6 +10,7 @@ Benchmark binaries for TPC-H and TPC-DS queries with optional CuDF GPU accelerat
 | `velox_cudf_tpch_benchmark` | TPC-H (Q1-Q22) | GPU | `CudfTpchBenchmark.cpp` |
 | `velox_tpcds_benchmark` | TPC-DS (Q1-Q99) | CPU | `velox/benchmarks/tpcds/` |
 | `velox_cudf_tpcds_benchmark` | TPC-DS (Q1-Q99) | GPU | `CudfTpcdsBenchmark.cpp` |
+| `velox_cudf_jit_fusion_benchmark` | JIT custom ops, per expression | GPU | `CudfJitFusionBenchmark.cpp` |
 
 CPU binaries use HiveConnector. GPU binaries use CudfHiveConnector and register
 cuDF GPU operator replacements.
@@ -140,6 +141,20 @@ These flags apply to `velox_cudf_tpch_benchmark` and `velox_cudf_tpcds_benchmark
 | `--cudf_gpu_batch_size_rows` | `100000` | GPU batch size in rows |
 | `--velox_cudf_table_scan` | `true` | Use CuDF table scan |
 | `--cudf_properties` | `""` | Path to a CudfConfig properties file (key=value per line). See `CudfConfig.h` for available keys |
+
+---
+
+## JIT Fusion Benchmark
+
+`velox_cudf_jit_fusion_benchmark` evaluates expressions with Presto functions
+that have JIT custom ops (`cudf.jit_custom_ops_enabled`) as OSS Velox does
+today, with every custom op call as a kernel of its own, and with the calls
+fused into one JIT kernel. `jit-fusion-benchmark.sh` runs its timings, kernel
+counts under nsys and cold compiles, and summarizes them as Markdown:
+
+```bash
+./velox/experimental/cudf/benchmarks/jit-fusion-benchmark.sh _build/release /tmp/jit-fusion
+```
 
 ---
 
