@@ -19,6 +19,11 @@
 #include <unordered_map>
 
 namespace facebook::velox::cudf_velox {
+
+// Generated from JitCustomOpsDevice.cu by EmbedBinary.cmake.
+extern const uint8_t kJitCustomOpsFragment[];
+extern const size_t kJitCustomOpsFragmentSize;
+
 namespace {
 
 std::unordered_map<std::string, JitCustomOpLowering>& jitCustomOps() {
@@ -27,6 +32,10 @@ std::unordered_map<std::string, JitCustomOpLowering>& jitCustomOps() {
 }
 
 } // namespace
+
+std::span<const uint8_t> jitCustomOpsFragment() {
+  return {kJitCustomOpsFragment, kJitCustomOpsFragmentSize};
+}
 
 void registerJitCustomOp(
     const std::string& name,

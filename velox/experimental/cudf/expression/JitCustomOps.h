@@ -21,8 +21,10 @@
 #include <cudf/ast/jit/udf.hpp>
 #include <cudf/types.hpp>
 
+#include <cstdint>
 #include <functional>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -42,6 +44,11 @@ struct JitCustomCall {
   /// Type of the value the device function writes.
   cudf::data_type outputType;
 };
+
+/// The JIT custom ops' device code (JitCustomOpsDevice.cu), a fatbin carrying
+/// LTO-IR that is embedded at build time. Every call of an op passes this one
+/// span, since cuDF identifies a fragment by its address and size.
+std::span<const uint8_t> jitCustomOpsFragment();
 
 /// Lowers a call of the function the op is registered for, or returns nullopt
 /// for a call the op does not implement, which the other evaluators then
