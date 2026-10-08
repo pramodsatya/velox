@@ -17,6 +17,7 @@
 #include "velox/experimental/cudf/expression/CommonFunctions.h"
 #include "velox/experimental/cudf/expression/DateTruncFunction.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/cudf/expression/JitCustomOps.h"
 #include "velox/experimental/cudf/expression/PrestoFunctions.h"
 #include "velox/experimental/cudf/expression/prestosql/DateAddFunction.h"
 #include "velox/experimental/cudf/expression/prestosql/DatePlusIntervalFunction.h"
@@ -198,6 +199,8 @@ void registerPrestoFunctions(const std::string& prefix) {
            .build()},
       true,
       DateTruncFunction::canEvaluate);
+
+  registerPrestoJitCustomOps(prefix);
 }
 
 } // namespace facebook::velox::cudf_velox

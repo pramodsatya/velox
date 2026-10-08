@@ -21,6 +21,7 @@
 #include "velox/experimental/cudf/expression/DecimalExpressionKernels.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluatorRegistry.h"
+#include "velox/experimental/cudf/expression/JitCustomOps.h"
 #include "velox/experimental/cudf/expression/NullMask.h"
 
 #include "velox/common/base/Exceptions.h"
@@ -3375,6 +3376,7 @@ std::shared_ptr<CudfExpression> createCudfExpression(
 void unregisterFunctions() {
   auto& registry = getCudfFunctionRegistry();
   registry.clear();
+  unregisterJitCustomOps();
 }
 
 } // namespace facebook::velox::cudf_velox

@@ -65,4 +65,9 @@ std::optional<JitCustomCall> lowerJitCustomOp(const core::TypedExprPtr& expr);
 
 void unregisterJitCustomOps();
 
+/// Registers the JIT custom ops of Presto functions, with names prefixed by
+/// `prefix`: year, month, quarter and week of a DATE, date_trunc of a DATE to a
+/// week, month, quarter or year, and round of a DOUBLE.
+void registerPrestoJitCustomOps(const std::string& prefix);
+
 } // namespace facebook::velox::cudf_velox
