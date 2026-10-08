@@ -23,7 +23,7 @@ JitExpression::JitExpression(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
     memory::MemoryPool* pool)
-    : expr_{expr, inputRowSchema, pool} {}
+    : expr_{expr, inputRowSchema, pool, /*isJit=*/true} {}
 
 void JitExpression::close() {
   expr_.close();
@@ -78,7 +78,7 @@ ColumnOrView JitExpression::eval(
 }
 
 bool JitExpression::canEvaluate(const core::TypedExprPtr& expr) {
-  return ASTExpression::canEvaluate(expr);
+  return detail::isAstExprSupported(expr, /*isJit=*/true);
 }
 
 void registerJitEvaluator(int priority) {

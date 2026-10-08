@@ -29,6 +29,7 @@ add_library(
   DecimalExpressionKernels.cpp
   DecimalExpressionKernelsGpu.cu
   ExpressionEvaluator.cpp
+  JitCustomOps.cpp
   JitExpression.cpp
   NullMask.cpp
   PrestoFunctions.cpp

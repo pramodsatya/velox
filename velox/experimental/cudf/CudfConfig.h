@@ -41,6 +41,10 @@ struct CudfConfig {
       "cudf.jit_expression_enabled"};
   static constexpr const char* kCudfJitExpressionPriority{
       "cudf.jit_expression_priority"};
+  static constexpr const char* kCudfJitCustomOpsEnabled{
+      "cudf.jit_custom_ops_enabled"};
+  static constexpr const char* kCudfJitCustomOpsFused{
+      "cudf.jit_custom_ops_fused"};
   static constexpr const char* kCudfOutputMr{"cudf.output_mr"};
   static constexpr const char* kCudfAllowCpuFallback{"cudf.allow_cpu_fallback"};
   static constexpr const char* kCudfLogFallback{"cudf.log_fallback"};
@@ -154,6 +158,18 @@ struct CudfConfig {
 
   /// Priority of JIT expression.
   int jitExpressionPriority{101};
+
+  /// Let the JIT evaluator call Velox device code for the functions that have
+  /// a JIT custom op (expression/JitCustomOps.h), inside the kernel of the
+  /// expression around them, instead of evaluating them with cuDF calls before
+  /// the kernel.
+  bool jitCustomOpsEnabled{false};
+
+  /// With jitCustomOpsEnabled, whether a custom op is fused with the
+  /// expression around it. When false, every custom op call runs as a kernel
+  /// of its own that reads only columns and literals, and the expression reads
+  /// its result as a column, which measures what fusion adds.
+  bool jitCustomOpsFused{true};
 
   /// Whether to log a reason for falling back to Velox CPU execution.
   bool logFallback{true};

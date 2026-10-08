@@ -24,6 +24,7 @@
 // TODO(kn): in another PR
 // #include "velox/experimental/cudf/CudfNoDefaults.h"
 #include "velox/experimental/cudf/expression/ExpressionEvaluator.h"
+#include "velox/experimental/cudf/expression/JitCustomOps.h"
 
 #include "velox/common/memory/Memory.h"
 #include "velox/core/Expressions.h"
@@ -279,8 +280,9 @@ bool isOpAndInputsSupported(
 
 // not special form, name = function, so unsupported for astpure
 // "in", "between", "isnotnull" are not special form, but supported for astpure
-// Check if the expression (name + input types) is supported in AST.
-bool isAstExprSupported(const core::TypedExprPtr& expr) {
+// Check if the expression (name + input types) is supported in AST. isJit adds
+// what only the JIT evaluator supports: JIT custom ops.
+bool isAstExprSupported(const core::TypedExprPtr& expr, bool isJit = false) {
   using Op = cudf::ast::ast_operator;
 
   // Reject expressions with types not yet supported in AST/JIT (currently
@@ -337,6 +339,11 @@ bool isAstExprSupported(const core::TypedExprPtr& expr) {
     const auto* call = expr->asUnchecked<core::CallTypedExpr>();
     const auto name =
         stripPrefix(call->name(), CudfConfig::getInstance().functionNamePrefix);
+
+    if (isJit && CudfConfig::getInstance().jitCustomOpsEnabled &&
+        lowerJitCustomOp(expr).has_value()) {
+      return true;
+    }
 
     // Binary operations.  Velox parsers always lower AND/OR into binary
     // chains, so a single isOpAndInputsSupported check covers them too.
@@ -397,8 +404,18 @@ struct AstContext {
       precomputeInstructions;
   memory::MemoryPool* pool;
   const core::TypedExprPtr rootExpr;
+  // Whether the JIT evaluator evaluates the tree, so it may call custom ops.
+  const bool isJit = false;
 
   cudf::ast::expression const& pushExprToTree(const core::TypedExprPtr& expr);
+  // Evaluates expr with the best evaluator before the tree, as a precomputed
+  // column the tree reads.
+  cudf::ast::expression const& compileSubExpression(
+      const core::TypedExprPtr& expr);
+  // Pushes expr, a call that a JIT custom op lowered to call.
+  cudf::ast::expression const& pushJitCustomCall(
+      const core::TypedExprPtr& expr,
+      const JitCustomCall& call);
   cudf::ast::expression const& addPrecomputeInstructionOnSide(
       size_t sideIdx,
       size_t columnIndex,
@@ -524,25 +541,8 @@ cudf::ast::expression const& AstContext::pushExprToTree(
   auto len = expr->inputs().size();
   auto& type = expr->type();
 
-  auto compileSubExpression = [&]() -> cudf::ast::expression const& {
-    int sideIdx = findExpressionSide(expr);
-    VELOX_CHECK_NE(
-        sideIdx,
-        -2,
-        "Expression spans both join sides and cannot be precomputed: {}",
-        expr->toString());
-    if (sideIdx < 0) {
-      sideIdx = 0;
-    }
-    auto node = createCudfExpression(expr, inputRowSchema[sideIdx], pool);
-    VELOX_CHECK_NOT_NULL(
-        node, "Failed to compile sub-expression: {}", expr->toString());
-    return addPrecomputeInstructionOnSide(
-        sideIdx, 0, expr->toString(), "", node);
-  };
-
-  if (!detail::isAstExprSupported(expr)) {
-    return compileSubExpression();
+  if (!detail::isAstExprSupported(expr, isJit)) {
+    return compileSubExpression(expr);
   }
 
   switch (expr->kind()) {
@@ -578,6 +578,11 @@ cudf::ast::expression const& AstContext::pushExprToTree(
           expr->asUnchecked<core::CallTypedExpr>()->name(),
           CudfConfig::getInstance().functionNamePrefix);
 
+      if (isJit && CudfConfig::getInstance().jitCustomOpsEnabled) {
+        if (const auto call = lowerJitCustomOp(expr)) {
+          return pushJitCustomCall(expr, *call);
+        }
+      }
       if (binaryOps.find(name) != binaryOps.end()) {
         VELOX_CHECK_EQ(len, 2);
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
@@ -651,7 +656,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
         }
         return *result;
       }
-      return compileSubExpression();
+      return compileSubExpression(expr);
     }
     case core::ExprKind::kCast: {
       VELOX_CHECK_EQ(len, 1);
@@ -663,7 +668,7 @@ cudf::ast::expression const& AstContext::pushExprToTree(
         auto const& op1 = pushExprToTree(expr->inputs()[0]);
         return tree.push(Operation{Op::CAST_TO_FLOAT64, op1});
       }
-      return compileSubExpression();
+      return compileSubExpression(expr);
     }
     case core::ExprKind::kDereference:
     case core::ExprKind::kFieldAccess: {
@@ -689,9 +694,49 @@ cudf::ast::expression const& AstContext::pushExprToTree(
     }
     // Fallback: compile unsupported sub-expression on-demand.
     default: {
-      return compileSubExpression();
+      return compileSubExpression(expr);
     }
   }
+}
+
+cudf::ast::expression const& AstContext::compileSubExpression(
+    const core::TypedExprPtr& expr) {
+  int sideIdx = findExpressionSide(expr);
+  VELOX_CHECK_NE(
+      sideIdx,
+      -2,
+      "Expression spans both join sides and cannot be precomputed: {}",
+      expr->toString());
+  if (sideIdx < 0) {
+    sideIdx = 0;
+  }
+  auto node = createCudfExpression(expr, inputRowSchema[sideIdx], pool);
+  VELOX_CHECK_NOT_NULL(
+      node, "Failed to compile sub-expression: {}", expr->toString());
+  return addPrecomputeInstructionOnSide(sideIdx, 0, expr->toString(), "", node);
+}
+
+cudf::ast::expression const& AstContext::pushJitCustomCall(
+    const core::TypedExprPtr& expr,
+    const JitCustomCall& call) {
+  const bool fused = CudfConfig::getInstance().jitCustomOpsFused;
+  // Unfused, a call outside the root gets a JIT expression of its own, where
+  // it is the root.
+  if (!fused && expr != rootExpr) {
+    return compileSubExpression(expr);
+  }
+  std::vector<std::reference_wrapper<const cudf::ast::expression>> args;
+  args.reserve(call.arguments.size());
+  for (const auto& arg : call.arguments) {
+    // Unfused, the call's kernel reads only columns and literals, as a function
+    // evaluated on its own would.
+    if (!fused && !arg->isConstantKind() && !arg->isFieldAccessKind()) {
+      args.push_back(compileSubExpression(arg));
+    } else {
+      args.push_back(pushExprToTree(arg));
+    }
+  }
+  return cudf::ast::jit::call(tree, call.function, call.outputType, args);
 }
 
 // Returns: 0 = left only, 1 = right only, -1 = no fields, -2 = spans both sides

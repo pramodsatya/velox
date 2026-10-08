@@ -458,6 +458,12 @@ void CudfConfig::initialize(
     astExpressionPriority =
         folly::to<int32_t>(config[kCudfAstExpressionPriority]);
   }
+  if (config.find(kCudfJitCustomOpsEnabled) != config.end()) {
+    jitCustomOpsEnabled = folly::to<bool>(config[kCudfJitCustomOpsEnabled]);
+  }
+  if (config.find(kCudfJitCustomOpsFused) != config.end()) {
+    jitCustomOpsFused = folly::to<bool>(config[kCudfJitCustomOpsFused]);
+  }
   if (config.find(kCudfAllowCpuFallback) != config.end()) {
     allowCpuFallback = folly::to<bool>(config[kCudfAllowCpuFallback]);
   }

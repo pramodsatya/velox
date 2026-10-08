@@ -33,9 +33,16 @@ cudf::ast::expression const& createAstTree(
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
     std::vector<PrecomputeInstruction>& precomputeInstructions,
-    memory::MemoryPool* pool) {
+    memory::MemoryPool* pool,
+    bool isJit) {
   AstContext context{
-      tree, scalars, {inputRowSchema}, {precomputeInstructions}, pool, expr};
+      tree,
+      scalars,
+      {inputRowSchema},
+      {precomputeInstructions},
+      pool,
+      expr,
+      isJit};
   return context.pushExprToTree(expr);
 }
 
@@ -61,7 +68,8 @@ cudf::ast::expression const& createAstTree(
 ASTExpression::ASTExpression(
     const core::TypedExprPtr& expr,
     const RowTypePtr& inputRowSchema,
-    memory::MemoryPool* pool)
+    memory::MemoryPool* pool,
+    bool isJit)
     : expr_(expr), inputRowSchema_(inputRowSchema), pool_(pool) {
   createAstTree(
       expr,
@@ -69,7 +77,8 @@ ASTExpression::ASTExpression(
       scalars_,
       inputRowSchema,
       precomputeInstructions_,
-      pool_);
+      pool_,
+      isJit);
 }
 
 void ASTExpression::close() {

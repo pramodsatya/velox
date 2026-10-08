@@ -24,13 +24,16 @@ namespace facebook::velox::cudf_velox {
 
 const std::string kAstEvaluatorName = "ast";
 
+/// isJit: whether a JIT evaluator evaluates the tree, so it may contain what
+/// only the JIT evaluators support, such as JIT custom ops.
 cudf::ast::expression const& createAstTree(
     const core::TypedExprPtr& expr,
     cudf::ast::tree& tree,
     std::vector<std::unique_ptr<cudf::scalar>>& scalars,
     const RowTypePtr& inputRowSchema,
     std::vector<PrecomputeInstruction>& precomputeInstructions,
-    memory::MemoryPool* pool);
+    memory::MemoryPool* pool,
+    bool isJit = false);
 
 cudf::ast::expression const& createAstTree(
     const core::TypedExprPtr& expr,
@@ -48,11 +51,12 @@ class ASTExpression : public CudfExpression {
   ASTExpression() = default;
 
   /// Convert velox core::TypedExpr to cudf::ast::tree, scalars and precompute
-  /// instructions.
+  /// instructions. isJit is as for createAstTree().
   ASTExpression(
       const core::TypedExprPtr& expr,
       const RowTypePtr& inputRowSchema,
-      memory::MemoryPool* pool);
+      memory::MemoryPool* pool,
+      bool isJit = false);
 
   ColumnOrView eval(
       std::vector<cudf::column_view> inputColumnViews,
