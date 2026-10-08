@@ -48,6 +48,12 @@ class JitExpression : public CudfExpression {
   // JitExpression
   static bool canEvaluate(const core::TypedExprPtr& expr);
 
+  // The subexpressions evaluated before the kernel, whose results it reads as
+  // columns.
+  const std::vector<PrecomputeInstruction>& precomputeInstructions() const {
+    return expr_.precomputeInstructions_;
+  }
+
  private:
   ASTExpression expr_;
 };
