@@ -123,6 +123,11 @@ block(SCOPE_FOR VARIABLES)
     UPDATE_DISCONNECTED 1
   )
 
+  # ast-jit-udf-call.patch is NVIDIA/cudf#24476: cudf::ast::jit::call
+  # (cudf/ast/jit/udf.hpp) lets an AST JIT expression call a device function
+  # linked from LTO-IR, inside the same kernel as the rest of the expression.
+  # The source is a tarball, so it is made a repository for git apply. Remove
+  # the patch once the pin is past the merged PR.
   FetchContent_Declare(
     cudf
     URL ${VELOX_cudf_SOURCE_URL}
@@ -130,6 +135,8 @@ block(SCOPE_FOR VARIABLES)
     SOURCE_SUBDIR
     cpp
     UPDATE_DISCONNECTED 1
+    PATCH_COMMAND
+      git init -q COMMAND git apply ${CMAKE_CURRENT_LIST_DIR}/cudf/ast-jit-udf-call.patch
   )
 
   if(UCX_FOUND)

@@ -1,0 +1,1269 @@
+diff --git a/cpp/include/cudf/ast/jit/udf.hpp b/cpp/include/cudf/ast/jit/udf.hpp
+new file mode 100644
+index 0000000000..06f839e87c
+--- /dev/null
++++ b/cpp/include/cudf/ast/jit/udf.hpp
+@@ -0,0 +1,104 @@
++/*
++ * SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
++ * SPDX-License-Identifier: Apache-2.0
++ */
++#pragma once
++
++#include <cudf/ast/expressions.hpp>
++#include <cudf/transform.hpp>
++#include <cudf/types.hpp>
++#include <cudf/utilities/export.hpp>
++
++#include <cstdint>
++#include <functional>
++#include <span>
++#include <string>
++#include <vector>
++
++/**
++ * @file
++ * @brief Calls of consumer-supplied device functions from JIT expressions.
++ */
++
++namespace CUDF_EXPORT cudf {
++namespace ast::jit {
++/**
++ * @addtogroup expressions
++ * @{
++ */
++
++/**
++ * @brief A device function compiled ahead of time to LTO-IR, which a JIT expression can call.
++ *
++ * `fragment` holds the function's LTO-IR, or a fatbin carrying it. `symbol` is the function's
++ * unmangled name. The kernel of an expression that calls the function is compiled to LTO-IR and
++ * linked with `fragment`, so the function's body is never compiled at runtime.
++ *
++ * The function must have the signature
++ *
++ * ```cpp
++ * extern "C" __device__ cudf::errc symbol(R* out, A... in);
++ * ```
++ *
++ * where `R` is the device type of the call's output type and `A...` are the device types of its
++ * arguments, passed by value (`int32_t`, `double`, `cudf::timestamp_D`, ...). It returns
++ * `cudf::errc::SUCCESS`, or an error code that fails the row, such as one of the codes
++ * `cudf::errc::USER_ERROR_0` to `USER_ERROR_31` that libcudf reserves for user-defined functions.
++ * The signature is provisional: it will follow the row ABI that libcudf's JIT is moving to.
++ *
++ * Rules for the function and its fragment:
++ * - The signature is not type-checked: a fragment whose function differs from the declaration
++ *   cuDF derives from the call has undefined behavior.
++ * - cuDF assumes the function is pure: calls with equal arguments return equal results, and no
++ *   side effect has to happen on every call. Reading constant data, such as a table compiled into
++ *   the fragment, is allowed. Equal calls may then share one evaluation. The caller must set
++ *   `is_pure` to `false` for a function that does not meet this, for example one that reads a
++ *   clock, a random state, or memory that changes while the kernel runs. cuDF cannot check this
++ *   setting, and a wrong one changes results.
++ * - A call of a function that is not pure is evaluated at most once per row, however many
++ *   expressions refer to it, and is never merged with another call.
++ * - The function must be row-local: no warp-collective operations, `__syncthreads` or shared
++ *   memory.
++ * - The fragment must target an architecture no newer than the device's, such as the one libcudf
++ *   compiles its own LTO-IR for.
++ * - The fragment must stay valid while expressions that call it are evaluated, and until a
++ *   `cudf::transform_program` compiled from them is constructed.
++ * - A fragment is identified by its address and size, so every call of one symbol must pass the
++ *   same span, and must agree on purity, argument types and output type.
++ */
++struct device_binary {
++  std::span<uint8_t const> fragment;                      ///< The function's LTO-IR or fatbin
++  lto_binary_type binary_type = lto_binary_type::LTO_IR;  ///< What `fragment` holds
++  std::string symbol;                                     ///< The function's unmangled name
++  bool is_pure = true;  ///< Whether equal calls may share one evaluation
++};
++
++/**
++ * @brief Creates a JIT expression that calls a consumer-supplied device function.
++ *
++ * The call is part of the generated JIT kernel, so it fuses with the surrounding expression. It
++ * can only be evaluated by the JIT evaluators, such as `cudf::compute_column_jit`.
++ *
++ * A row with a null argument skips the call and produces null. A failing row raises
++ * `cudf::evaluation_error` under `error_policy::PROPAGATE`, and produces null under
++ * `error_policy::NULLIFY`.
++ *
++ * @throws std::invalid_argument if `output_type` is not fixed-width, `args` is empty, `function`
++ * has no fragment, or `function.symbol` is not a C identifier
++ *
++ * @param tree The expression tree to which this expression will be added
++ * @param function The device function to call
++ * @param output_type The type of the value the function writes
++ * @param args The call's arguments
++ * @param error_policy How a row whose call fails is handled
++ * @return A reference to the created call expression
++ */
++expression const& call(ast::tree& tree,
++                       device_binary const& function,
++                       data_type output_type,
++                       std::vector<std::reference_wrapper<expression const>> const& args,
++                       cudf::error_policy error_policy = cudf::error_policy::PROPAGATE);
++
++/** @} */  // end of group
++}  // namespace ast::jit
++}  // namespace CUDF_EXPORT cudf
+diff --git a/cpp/include/cudf/detail/row_ir/opcode.hpp b/cpp/include/cudf/detail/row_ir/opcode.hpp
+index fe44b4b240..cc2d4dc6b1 100644
+--- a/cpp/include/cudf/detail/row_ir/opcode.hpp
++++ b/cpp/include/cudf/detail/row_ir/opcode.hpp
+@@ -109,6 +109,10 @@ enum class [[nodiscard]] opcode : int32_t {
+   SINH,
+   TAN,
+   TANH,
++
++  /// Call of a consumer-supplied device function (`cudf::ast::jit::call`). Its arity and types come
++  /// from the call node, not from the operator table.
++  UDF_CALL,
+ };
+ 
+ template <opcode op>
+@@ -294,5 +298,39 @@ __device__ constexpr auto evaluate(cuda::std::optional<T>... args)
+   }
+ }
+ 
++/**
++ * @brief Calls a consumer device function `F` with the signature `cudf::errc F(R* out, T... in)`.
++ *
++ * @return The value `F` wrote, or the error code it returned
++ */
++template <auto F, typename R, typename... T>
++__device__ constexpr cuda::std::expected<R, cudf::errc> invoke_udf(T... args)
++{
++  R out{};
++  auto const status = F(&out, args...);
++  if (status != cudf::errc::SUCCESS) { return cuda::std::unexpected{status}; }
++  return out;
++}
++
++// UDF call over non-nullable values.
++template <auto F, typename R, typename... T>
++__device__ constexpr cuda::std::expected<R, cudf::errc> evaluate_udf(T... args)
++  requires(!cudf::detail::ops::nullable<T> && ...)
++{
++  return invoke_udf<F, R>(args...);
++}
++
++// UDF call over nullable values: a row with a null argument skips the call, and its result is null.
++template <auto F, typename R, typename... T>
++__device__ constexpr cuda::std::expected<cuda::std::optional<R>, cudf::errc> evaluate_udf(
++  cuda::std::optional<T>... args)
++{
++  using result_t = cuda::std::expected<cuda::std::optional<R>, cudf::errc>;
++  if ((!args.has_value() || ...)) { return result_t{cuda::std::optional<R>{}}; }
++  auto result = invoke_udf<F, R>(args.value()...);
++  if (!result.has_value()) { return result_t{cuda::std::unexpected{result.error()}}; }
++  return result_t{cuda::std::optional<R>{*result}};
++}
++
+ }  // namespace detail::row_ir
+ }  // namespace CUDF_EXPORT cudf
+diff --git a/cpp/include/cudf/errc.hpp b/cpp/include/cudf/errc.hpp
+index 4e1f606eb2..d53fcb27df 100644
+--- a/cpp/include/cudf/errc.hpp
++++ b/cpp/include/cudf/errc.hpp
+@@ -22,11 +22,47 @@ namespace CUDF_EXPORT cudf {
+ 
+ /**
+  * @brief An enumeration of error codes that can occur during operations.
++ *
++ * The last 32 codes, `USER_ERROR_0` to `USER_ERROR_31`, are reserved for user-defined functions.
++ * libcudf never returns them and gives them no meaning, so a user-defined function can fail a row
++ * with any of them and leave its meaning to the caller.
+  */
+ enum class [[nodiscard]] errc : cuda::std::int8_t {
+   SUCCESS             = 0,
+   ARITHMETIC_OVERFLOW = 1,
+   DIVISION_BY_ZERO    = 2,
++  USER_ERROR_0        = 96,
++  USER_ERROR_1        = 97,
++  USER_ERROR_2        = 98,
++  USER_ERROR_3        = 99,
++  USER_ERROR_4        = 100,
++  USER_ERROR_5        = 101,
++  USER_ERROR_6        = 102,
++  USER_ERROR_7        = 103,
++  USER_ERROR_8        = 104,
++  USER_ERROR_9        = 105,
++  USER_ERROR_10       = 106,
++  USER_ERROR_11       = 107,
++  USER_ERROR_12       = 108,
++  USER_ERROR_13       = 109,
++  USER_ERROR_14       = 110,
++  USER_ERROR_15       = 111,
++  USER_ERROR_16       = 112,
++  USER_ERROR_17       = 113,
++  USER_ERROR_18       = 114,
++  USER_ERROR_19       = 115,
++  USER_ERROR_20       = 116,
++  USER_ERROR_21       = 117,
++  USER_ERROR_22       = 118,
++  USER_ERROR_23       = 119,
++  USER_ERROR_24       = 120,
++  USER_ERROR_25       = 121,
++  USER_ERROR_26       = 122,
++  USER_ERROR_27       = 123,
++  USER_ERROR_28       = 124,
++  USER_ERROR_29       = 125,
++  USER_ERROR_30       = 126,
++  USER_ERROR_31       = 127,
+ };
+ 
+ /**
+@@ -40,6 +76,38 @@ enum class [[nodiscard]] errc : cuda::std::int8_t {
+     case errc::SUCCESS: return "SUCCESS";
+     case errc::ARITHMETIC_OVERFLOW: return "ARITHMETIC_OVERFLOW";
+     case errc::DIVISION_BY_ZERO: return "DIVISION_BY_ZERO";
++    case errc::USER_ERROR_0: return "USER_ERROR_0";
++    case errc::USER_ERROR_1: return "USER_ERROR_1";
++    case errc::USER_ERROR_2: return "USER_ERROR_2";
++    case errc::USER_ERROR_3: return "USER_ERROR_3";
++    case errc::USER_ERROR_4: return "USER_ERROR_4";
++    case errc::USER_ERROR_5: return "USER_ERROR_5";
++    case errc::USER_ERROR_6: return "USER_ERROR_6";
++    case errc::USER_ERROR_7: return "USER_ERROR_7";
++    case errc::USER_ERROR_8: return "USER_ERROR_8";
++    case errc::USER_ERROR_9: return "USER_ERROR_9";
++    case errc::USER_ERROR_10: return "USER_ERROR_10";
++    case errc::USER_ERROR_11: return "USER_ERROR_11";
++    case errc::USER_ERROR_12: return "USER_ERROR_12";
++    case errc::USER_ERROR_13: return "USER_ERROR_13";
++    case errc::USER_ERROR_14: return "USER_ERROR_14";
++    case errc::USER_ERROR_15: return "USER_ERROR_15";
++    case errc::USER_ERROR_16: return "USER_ERROR_16";
++    case errc::USER_ERROR_17: return "USER_ERROR_17";
++    case errc::USER_ERROR_18: return "USER_ERROR_18";
++    case errc::USER_ERROR_19: return "USER_ERROR_19";
++    case errc::USER_ERROR_20: return "USER_ERROR_20";
++    case errc::USER_ERROR_21: return "USER_ERROR_21";
++    case errc::USER_ERROR_22: return "USER_ERROR_22";
++    case errc::USER_ERROR_23: return "USER_ERROR_23";
++    case errc::USER_ERROR_24: return "USER_ERROR_24";
++    case errc::USER_ERROR_25: return "USER_ERROR_25";
++    case errc::USER_ERROR_26: return "USER_ERROR_26";
++    case errc::USER_ERROR_27: return "USER_ERROR_27";
++    case errc::USER_ERROR_28: return "USER_ERROR_28";
++    case errc::USER_ERROR_29: return "USER_ERROR_29";
++    case errc::USER_ERROR_30: return "USER_ERROR_30";
++    case errc::USER_ERROR_31: return "USER_ERROR_31";
+     default: return "UNKNOWN_ERROR";
+   }
+ }
+diff --git a/cpp/src/ast/jit/expressions.cpp b/cpp/src/ast/jit/expressions.cpp
+index 84b3a06a81..32c10fb05c 100644
+--- a/cpp/src/ast/jit/expressions.cpp
++++ b/cpp/src/ast/jit/expressions.cpp
+@@ -7,15 +7,20 @@
+ #include "jit/row_ir.hpp"
+ 
+ #include <cudf/ast/expressions.hpp>
++#include <cudf/ast/jit/udf.hpp>
+ #include <cudf/detail/row_ir/opcode.hpp>
+ #include <cudf/utilities/error.hpp>
++#include <cudf/utilities/traits.hpp>
+ 
+ #include <cuda/stream>
+ 
++#include <algorithm>
+ #include <initializer_list>
+ #include <memory>
+ #include <stdexcept>
+ #include <string>
++#include <string_view>
++#include <vector>
+ 
+ namespace cudf {
+ namespace ast {
+@@ -52,6 +57,35 @@ std::unique_ptr<cudf::detail::row_ir::node> operation::accept(
+   return converter.add_ir_node(*this);
+ }
+ 
++cudf::size_type udf_call::accept(cudf::ast::detail::expression_parser& visitor) const
++{
++  CUDF_FAIL("JIT UDF call is an internal expression and should not be visited by expression_parser",
++            std::invalid_argument);
++}
++
++std::reference_wrapper<expression const> udf_call::accept(
++  cudf::ast::detail::expression_transformer& visitor) const
++{
++  CUDF_FAIL(
++    "JIT UDF call is an internal expression and should not be visited by "
++    "expression_transformer",
++    std::invalid_argument);
++}
++
++bool udf_call::may_evaluate_null(table_view const& left,
++                                 table_view const& right,
++                                 cuda::stream_ref stream) const
++{
++  CUDF_FAIL("JIT UDF call is an internal expression and should not be evaluated directly",
++            std::invalid_argument);
++}
++
++std::unique_ptr<cudf::detail::row_ir::node> udf_call::accept(
++  cudf::detail::row_ir::ast_converter& converter) const
++{
++  return converter.add_ir_node(*this);
++}
++
+ }  // namespace detail
+ }  // namespace jit
+ 
+@@ -155,6 +189,38 @@ expression const& jit::operation(ast::tree& tree,
+     detail::operation(as_opcode(operator_id), std::move(args), error_policy, target_scale));
+ }
+ 
++namespace {
++
++// Whether `name` can be declared as an `extern "C"` function.
++bool is_c_identifier(std::string_view name)
++{
++  auto const is_alpha = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); };
++  auto const is_digit = [](char c) { return c >= '0' && c <= '9'; };
++  return !name.empty() && (is_alpha(name.front()) || name.front() == '_') &&
++         std::ranges::all_of(name, [&](char c) { return is_alpha(c) || is_digit(c) || c == '_'; });
++}
++
++}  // namespace
++
++expression const& jit::call(ast::tree& tree,
++                            device_binary const& function,
++                            data_type output_type,
++                            std::vector<std::reference_wrapper<expression const>> const& args,
++                            cudf::error_policy error_policy)
++{
++  CUDF_EXPECTS(!args.empty(), "A JIT UDF call needs at least one argument", std::invalid_argument);
++  CUDF_EXPECTS(is_fixed_width(output_type),
++               "A JIT UDF call must produce a fixed-width type",
++               std::invalid_argument);
++  CUDF_EXPECTS(!function.fragment.empty(),
++               "A JIT UDF call needs the fragment that defines its function",
++               std::invalid_argument);
++  CUDF_EXPECTS(is_c_identifier(function.symbol),
++               "A JIT UDF call's symbol must be a C identifier: " + function.symbol,
++               std::invalid_argument);
++  return tree.push(detail::udf_call(function, output_type, args, error_policy));
++}
++
+ expression const& jit::operation(
+   ast::tree& tree,
+   op operator_id,
+diff --git a/cpp/src/ast/jit/expressions.hpp b/cpp/src/ast/jit/expressions.hpp
+index a2e26f02e1..c1dac64f87 100644
+--- a/cpp/src/ast/jit/expressions.hpp
++++ b/cpp/src/ast/jit/expressions.hpp
+@@ -5,6 +5,7 @@
+ #pragma once
+ 
+ #include <cudf/ast/expressions.hpp>
++#include <cudf/ast/jit/udf.hpp>
+ #include <cudf/detail/row_ir/opcode.hpp>
+ #include <cudf/table/table_view.hpp>
+ #include <cudf/types.hpp>
+@@ -106,4 +107,91 @@ struct operation : public ast::expression {
+   std::optional<int32_t> target_scale_ = std::nullopt;
+ };
+ 
++/**
++ * @brief A call of a consumer-supplied device function, created by `cudf::ast::jit::call`.
++ */
++struct udf_call : public ast::expression {
++  /**
++   * @brief Construct a new udf_call object.
++   * @param function The device function to call
++   * @param output_type The type of the value the function writes
++   * @param args The arguments for this call
++   * @param error_policy How a row whose call fails is handled
++   */
++  udf_call(device_binary function,
++           data_type output_type,
++           std::vector<std::reference_wrapper<expression const>> args,
++           cudf::error_policy error_policy)
++    : function_{std::move(function)},
++      output_type_{output_type},
++      args_{std::move(args)},
++      error_policy_{error_policy}
++  {
++  }
++
++  udf_call(udf_call const&)            = default;  //< Copy constructor
++  udf_call(udf_call&&)                 = default;  //< Move constructor
++  udf_call& operator=(udf_call const&) = default;  //< Copy assignment
++  udf_call& operator=(udf_call&&)      = default;  //< Move assignment
++  ~udf_call() override                 = default;  //< Destructor
++
++  /**
++   * @brief Get the device function this expression calls.
++   *
++   * @return The device function
++   */
++  [[nodiscard]] device_binary const& get_function() const { return function_; }
++
++  /**
++   * @brief Get the type of the value the function writes.
++   *
++   * @return The output type
++   */
++  [[nodiscard]] data_type get_output_type() const { return output_type_; }
++
++  /**
++   * @brief Get the arguments.
++   *
++   * @return Span of arguments
++   */
++  [[nodiscard]] std::span<std::reference_wrapper<expression const> const> get_arguments() const
++  {
++    return args_;
++  }
++
++  /**
++   * @brief How a row whose call fails is handled.
++   *
++   * @return The error policy for this call
++   */
++  [[nodiscard]] cudf::error_policy get_error_policy() const { return error_policy_; }
++
++  /**
++   * @copydoc expression::accept
++   */
++  cudf::size_type accept(cudf::ast::detail::expression_parser& visitor) const override;
++
++  /**
++   * @copydoc expression::accept
++   */
++  std::reference_wrapper<expression const> accept(
++    cudf::ast::detail::expression_transformer& visitor) const override;
++
++  [[nodiscard]] bool may_evaluate_null(table_view const& left,
++                                       table_view const& right,
++                                       cuda::stream_ref stream) const override;
++
++  /**
++   * @copydoc expression::accept
++   */
++  [[nodiscard]] std::unique_ptr<cudf::detail::row_ir::node> accept(
++    cudf::detail::row_ir::ast_converter& visitor) const override;
++
++ private:
++  device_binary function_;
++  data_type output_type_;
++  std::vector<std::reference_wrapper<expression const>> args_;
++  cudf::error_policy error_policy_ = cudf::error_policy::PROPAGATE;
++};
++
+ }  // namespace cudf::ast::jit::detail
+diff --git a/cpp/src/jit/helpers.cpp b/cpp/src/jit/helpers.cpp
+index ecff168cd3..e3a0a165ed 100644
+--- a/cpp/src/jit/helpers.cpp
++++ b/cpp/src/jit/helpers.cpp
+@@ -102,6 +102,58 @@ kernel get_udf_kernel(std::string const& source_file,
+   return get_kernel(source_file, source_file, include_names, include_headers, kernel_name);
+ }
+ 
++rtcx::blob get_udf_source_kernel_fragment(std::string const& source_file,
++                                          std::string const& kernel_name,
++                                          std::string const& cuda_source)
++{
++  CUDF_FUNC_RANGE();
++
++  auto kernel_instance_source = std::format(R"***(
++ #define CUDF_KERNEL_INSTANCE {}
++ )***",
++                                            kernel_name);
++  char const* include_names[] =  // NOLINT(modernize-avoid-c-arrays)
++    {"cudf/detail/operation_udf.cuh", "cudf/detail/kernel_instance.cuh"};
++  char const* include_headers[] =  // NOLINT(modernize-avoid-c-arrays)
++    {cuda_source.c_str(), kernel_instance_source.c_str()};
++
++  return get_kernel_fragment(source_file, source_file, include_names, include_headers, kernel_name);
++}
++
++kernel get_udf_kernel(std::string const& source_file,
++                      std::string const& kernel_name,
++                      std::string const& cuda_source,
++                      std::span<detail::row_ir::udf_fragment const> callee_fragments)
++{
++  if (callee_fragments.empty()) { return get_udf_kernel(source_file, kernel_name, cuda_source); }
++
++  CUDF_FUNC_RANGE();
++  auto kernel_fragment = get_udf_source_kernel_fragment(source_file, kernel_name, cuda_source);
++
++  // Unnamed fragments are cached by their bytes, so a linked kernel is reused only for the exact
++  // fragments it was linked from.
++  std::vector<rtcx::memory_fragment> fragments{
++    {.data = kernel_fragment->view(), .type = rtcx::binary_type::LTO_IR, .name = nullptr}};
++  for (auto const& fragment : callee_fragments) {
++    fragments.push_back({.data = fragment.data,
++                         .type = fragment.type == lto_binary_type::LTO_IR
++                                   ? rtcx::binary_type::LTO_IR
++                                   : rtcx::binary_type::FATBIN,
++                         .name = nullptr});
++  }
++  return get_lto_linked_kernel(source_file, {}, fragments);
++}
++
++std::string define_operation(std::string const& cuda_source,
++                             std::string_view operation_macro,
++                             std::string_view function_name)
++{
++  // The call stays unqualified, as the call of a renamed function was: a qualified call is checked
++  // when the kernel template is defined, even in a branch the kernel never takes.
++  return std::format(
++    "{}\n#define {}(...) {}(__VA_ARGS__)\n", cuda_source, operation_macro, function_name);
++}
++
+ rtcx::blob get_udf_kernel_fragment(std::string const& source_file,
+                                    std::string const& kernel_name,
+                                    std::string const& udf_type)
+diff --git a/cpp/src/jit/helpers.hpp b/cpp/src/jit/helpers.hpp
+index 7f0bc39485..2f41f425ae 100644
+--- a/cpp/src/jit/helpers.hpp
++++ b/cpp/src/jit/helpers.hpp
+@@ -13,9 +13,12 @@
+ #include <cuda/iterator>
+ 
+ #include <jit/cache.hpp>
++#include <jit/row_ir.hpp>
+ 
+ #include <algorithm>
+ #include <span>
++#include <string>
++#include <string_view>
+ #include <variant>
+ #include <vector>
+ 
+@@ -79,5 +82,38 @@ rtcx::blob get_udf_kernel_fragment(std::string const& source_file,
+                                    std::string const& kernel_name,
+                                    std::string const& udf_type);
+ 
++/**
++ * @brief Compile a UDF kernel together with the UDF's CUDA source to an LTO-IR fragment, for
++ * linking with fragments that define the functions the UDF declares but does not define.
++ */
++rtcx::blob get_udf_source_kernel_fragment(std::string const& source_file,
++                                          std::string const& kernel_name,
++                                          std::string const& cuda_source);
++
++/**
++ * @brief Get a UDF kernel whose CUDA source calls LTO callees: the kernel is compiled to LTO-IR
++ * and linked with the fragments that define them. Without callees, this is `get_udf_kernel`.
++ */
++kernel get_udf_kernel(std::string const& source_file,
++                      std::string const& kernel_name,
++                      std::string const& cuda_source,
++                      std::span<detail::row_ir::udf_fragment const> callee_fragments);
++
++/**
++ * @brief Make code generated by row IR callable through a kernel's operation macro.
++ *
++ * The generated code is compiled as it is: instead of having the source parser rename the first
++ * function it finds, which may be a callee declaration, the macro through which the kernel calls
++ * the operation is defined as a call of the generated function.
++ *
++ * @param cuda_source The generated code, which defines `function_name` at global scope
++ * @param operation_macro The macro through which the kernel calls the operation
++ * @param function_name The name of the generated function
++ * @return The code to compile as the kernel's operation
++ */
++std::string define_operation(std::string const& cuda_source,
++                             std::string_view operation_macro,
++                             std::string_view function_name);
++
+ }  // namespace jit
+ }  // namespace cudf
+diff --git a/cpp/src/jit/row_ir.cpp b/cpp/src/jit/row_ir.cpp
+index 015e94aae9..69860410ed 100644
+--- a/cpp/src/jit/row_ir.cpp
++++ b/cpp/src/jit/row_ir.cpp
+@@ -17,9 +17,11 @@
+ #include <format>
+ #include <iostream>
+ #include <iterator>
++#include <map>
+ #include <numeric>
+ #include <span>
+ #include <stdexcept>
++#include <type_traits>
+ #include <utility>
+ 
+ namespace cudf::detail::row_ir {
+@@ -225,6 +227,9 @@ struct [[nodiscard]] opcode_info {
+       {"SINH", PROPAGATE, false, false, {FLOATS}, ARG0},
+       {"TAN", PROPAGATE, false, false, {FLOATS}, ARG0},
+       {"TANH", PROPAGATE, false, false, {FLOATS}, ARG0},
++      // Placeholder that keeps the table aligned with the opcodes: a UDF_CALL node takes its
++      // arity, null behaviour and types from its udf_info, never from this row.
++      {"UDF_CALL", PROPAGATE, false, false, {}, NONE},
+     };
+ 
+   auto index = static_cast<size_t>(op);
+@@ -477,6 +482,11 @@ int32_t instance_context::add_input(input in)
+ 
+ node const* instance_context::find_equivalent(node const& candidate) const
+ {
++  // An AST call referred to more than once is converted once per reference. Its conversions are
++  // matched by the call they came from, since their literal arguments are separate inputs.
++  if (auto const* call_site = candidate.get_call_site(); call_site != nullptr) {
++    if (auto call = udf_calls_.find(call_site); call != udf_calls_.end()) { return call->second; }
++  }
+   auto [first, last] = cse_nodes_.equal_range(candidate.hash());
+   auto found =
+     std::find_if(first, last, [&](auto& entry) { return candidate.is_equivalent(*entry.second); });
+@@ -486,6 +496,9 @@ node const* instance_context::find_equivalent(node const& candidate) const
+ void instance_context::add_cse_node(node const& candidate)
+ {
+   cse_nodes_.emplace(candidate.hash(), &candidate);
++  if (auto const* call_site = candidate.get_call_site(); call_site != nullptr) {
++    udf_calls_.emplace(call_site, &candidate);
++  }
+ }
+ 
+ std::string instance_context::make_tmp_id()
+@@ -522,6 +535,14 @@ size_t node::compute_hash() const
+     reference_);
+   h = cudf::hashing::detail::hash_combine(
+     h, target_scale_.has_value() ? std::hash<int32_t>{}(*target_scale_) : 0);
++  if (udf_ != nullptr) {
++    // The symbol and output type tell most callees apart; is_equivalent compares the full callee.
++    h = cudf::hashing::detail::hash_combine(h, std::hash<std::string>{}(udf_->symbol));
++    h = cudf::hashing::detail::hash_combine(
++      h,
++      std::hash<std::underlying_type_t<type_id>>{}(
++        static_cast<std::underlying_type_t<type_id>>(udf_->output_type.id())));
++  }
+   for (auto& arg : args_) {
+     h = cudf::hashing::detail::hash_combine(h, arg->hash());
+   }
+@@ -575,6 +596,22 @@ node::node(input_reference input)
+   hash_ = compute_hash();
+ }
+ 
++node::node(udf_info udf,
++           ast::jit::detail::udf_call const& call_site,
++           error_policy error_policy,
++           std::vector<std::unique_ptr<node>> args)
++  : op_{opcode::UDF_CALL},
++    error_policy_{error_policy},
++    args_{std::move(args)},
++    udf_{std::make_shared<udf_info const>(std::move(udf))},
++    call_site_{&call_site}
++{
++  CUDF_EXPECTS(!args_.empty(),
++               std::format("UDF call `{}` needs at least one argument.", udf_->symbol),
++               std::runtime_error);
++  hash_ = compute_hash();
++}
++
+ node::node(output_reference reference, std::unique_ptr<node> arg)
+   : reference_{reference}, op_{opcode::SET_OUTPUT}
+ {
+@@ -592,8 +629,13 @@ size_t node::hash() const { return hash_; }
+ 
+ bool node::is_equivalent(node const& other) const
+ {
++  // Separate calls of a function that isn't pure never merge. A call referred to more than once is
++  // still evaluated once, see instance_context::find_equivalent.
++  auto const same_udf =
++    (udf_ == nullptr && other.udf_ == nullptr) ||
++    (udf_ != nullptr && other.udf_ != nullptr && udf_->is_pure && *udf_ == *other.udf_);
+   return hash_ == other.hash_ && op_ == other.op_ && target_scale_ == other.target_scale_ &&
+-         error_policy_ == other.error_policy_ && reference_ == other.reference_ &&
++         error_policy_ == other.error_policy_ && reference_ == other.reference_ && same_udf &&
+          args_.size() == other.args_.size() &&
+          std::equal(
+            args_.begin(), args_.end(), other.args_.begin(), [](auto const& lhs, auto const& rhs) {
+@@ -611,10 +653,21 @@ opcode node::get_opcode() const { return op_; }
+ 
+ std::span<std::unique_ptr<node> const> node::get_args() const { return args_; }
+ 
++udf_info const* node::get_udf() const { return udf_.get(); }
++
++ast::jit::detail::udf_call const* node::get_call_site() const { return call_site_; }
++
+ bool node::is_null_aware() const
+ {
+   if (op_ == opcode::GET_INPUT) { return false; }
+ 
++  // A NULLIFY call emits nulls for failing rows, so like an always-nullable operator it needs the
++  // nullable form of the generated code.
++  if (op_ == opcode::UDF_CALL) {
++    return error_policy_ == cudf::error_policy::NULLIFY ||
++           std::ranges::any_of(args_, [](auto& a) { return a->is_null_aware(); });
++  }
++
+   // to emit nulls for always-nullable operators, we  need to mark them as null-aware
+   auto op_info = get_op_info(op_, error_policy_);
+ 
+@@ -634,6 +687,11 @@ bool node::is_always_valid() const
+ {
+   if (op_ == opcode::GET_INPUT) { return false; }
+ 
++  if (op_ == opcode::UDF_CALL) {
++    if (error_policy_ == cudf::error_policy::NULLIFY) { return false; }
++    return std::ranges::all_of(args_, [](auto& a) { return a->is_always_valid(); });
++  }
++
+   auto null_policy = get_op_info(op_, error_policy_).null_policy;
+ 
+   switch (null_policy) {
+@@ -686,6 +744,9 @@ void node::instantiate(instance_context& ctx)
+     case opcode::SET_OUTPUT: {
+       type_ = args_[0]->get_type();
+     } break;
++    case opcode::UDF_CALL: {
++      type_ = udf_->output_type;
++    } break;
+     default: {
+       std::vector<data_type> arg_types;
+       for (auto& arg : args_) {
+@@ -745,6 +806,46 @@ void node::emit_code(instance_context& instance, target_info const& info, code_s
+             id_));
+         } break;
+ 
++        case opcode::UDF_CALL: {
++          auto args_str = std::accumulate(
++            args_.begin() + 1,
++            args_.end(),
++            std::string{args_[0]->get_id()},
++            [](auto const& a, auto& node) { return std::format("{}, {}", a, node->get_id()); });
++          auto call = std::format("cudf::detail::row_ir::evaluate_udf<&{}, {}>({})",
++                                  udf_->symbol,
++                                  type_to_name(udf_->output_type),
++                                  args_str);
++
++          // evaluate_udf always returns a cuda::std::expected, so both policies reuse the
++          // handling of fallible operators.
++          if (error_policy_ != cudf::error_policy::NULLIFY) {
++            sink.emit(std::format(
++              R"***(auto expected__{1} = {2};
++if(!expected__{1}.has_value()) {{
++ return expected__{1}.error();
++}}
++{0} {1} = expected__{1}.value();
++)***",
++              type,
++              id_,
++              call));
++          } else {
++            sink.emit(std::format(
++              R"***({0} {1}{{}};
++auto expected__{1} = {2};
++if(expected__{1}.has_value()) {{
++  {1} = expected__{1}.value();
++}} else {{
++  {1} = {{}};
++}}
++)***",
++              type,
++              id_,
++              call));
++          }
++        } break;
++
+         default: {
+           auto op_info   = get_op_info(op_, error_policy_);
+           auto first_arg = std::format("{}", args_[0]->get_id());
+@@ -873,6 +974,87 @@ std::unique_ptr<row_ir::node> ast_converter::add_ir_node(ast::jit::detail::opera
+     expr.get_opcode(), expr.get_target_scale(), expr.get_error_policy(), std::move(args));
+ }
+ 
++std::unique_ptr<row_ir::node> ast_converter::add_ir_node(ast::jit::detail::udf_call const& expr)
++{
++  std::vector<std::unique_ptr<row_ir::node>> args;
++  for (auto& arg : expr.get_arguments()) {
++    args.emplace_back(arg.get().accept(*this));
++  }
++  auto const& function = expr.get_function();
++  auto info            = udf_info{.symbol        = function.symbol,
++                                  .fragment      = function.fragment,
++                                  .fragment_type = function.binary_type,
++                                  .output_type   = expr.get_output_type(),
++                                  .is_pure       = function.is_pure};
++  return std::make_unique<row_ir::node>(
++    std::move(info), expr, expr.get_error_policy(), std::move(args));
++}
++
++namespace {
++
++/**
++ * @brief The LTO callees a tree calls, in first-call order, one call per symbol.
++ *
++ * Every call of a symbol must carry the same definition (fragment and purity) and the same
++ * signature, because the symbol is declared once.
++ */
++struct udf_calls {
++  std::map<std::string, node const*> by_symbol;
++  std::vector<node const*> first_calls;
++};
++
++bool same_signature(node const& lhs, node const& rhs)
++{
++  auto const lhs_args = lhs.get_args();
++  auto const rhs_args = rhs.get_args();
++  return lhs.get_udf()->output_type == rhs.get_udf()->output_type &&
++         std::ranges::equal(lhs_args, rhs_args, [](auto const& l, auto const& r) {
++           return l->get_type() == r->get_type();
++         });
++}
++
++void collect_udfs(node const& ir, udf_calls& calls)
++{
++  for (auto& arg : ir.get_args()) {
++    collect_udfs(*arg, calls);
++  }
++  auto const* udf = ir.get_udf();
++  if (udf == nullptr) { return; }
++
++  auto [it, inserted] = calls.by_symbol.try_emplace(udf->symbol, &ir);
++  if (inserted) {
++    calls.first_calls.emplace_back(&ir);
++    return;
++  }
++  auto const& first          = *it->second->get_udf();
++  auto const same_definition = first.fragment.data() == udf->fragment.data() &&
++                               first.fragment.size() == udf->fragment.size() &&
++                               first.fragment_type == udf->fragment_type &&
++                               first.is_pure == udf->is_pure;
++  CUDF_EXPECTS(same_definition,
++               std::format("UDF `{}` is called with two different definitions.", udf->symbol),
++               std::invalid_argument);
++  CUDF_EXPECTS(same_signature(*it->second, ir),
++               std::format("UDF `{}` is called with two different signatures.", udf->symbol),
++               std::invalid_argument);
++}
++
++/**
++ * @brief Declare an LTO callee the way it is defined: `extern "C"`, returning an error code.
++ */
++std::string lto_declaration(node const& call)
++{
++  auto const& udf = *call.get_udf();
++  auto params     = std::format("{}* out", to_cuda_type(udf.output_type, false));
++  auto index      = 0;
++  for (auto& arg : call.get_args()) {
++    params += std::format(", {} in_{}", to_cuda_type(arg->get_type(), false), index++);
++  }
++  return std::format("extern \"C\" __device__ cudf::errc {}({});\n", udf.symbol, params);
++}
++
++}  // namespace
++
+ bool is_nullable(scalar_input const& in)
+ {
+   if (auto* s = std::get_if<std::unique_ptr<column>>(&in)) {
+@@ -963,7 +1145,23 @@ std::tuple<std::string, null_aware, std::vector<output_nullability>> ast_convert
+     }
+   }();
+ 
++  udf_calls calls;
++  for (auto& ir : output_irs_) {
++    collect_udfs(*ir, calls);
++  }
++
+   code_sink sink;
++  // Each LTO callee is declared before the generated function. Without calls the code is unchanged.
++  for (auto const* call : calls.first_calls) {
++    sink.emit(lto_declaration(*call));
++    auto const& udf = *call->get_udf();
++    if (std::ranges::none_of(udf_fragments_, [&](auto const& fragment) {
++          return fragment.data.data() == udf.fragment.data() &&
++                 fragment.data.size() == udf.fragment.size();
++        })) {
++      udf_fragments_.push_back(udf_fragment{.data = udf.fragment, .type = udf.fragment_type});
++    }
++  }
+   sink.emit(std::format("__device__ cudf::errc {}(", function_name));
+   sink.emit(args_decl);
+   sink.emit(")\n{\n");
+@@ -1047,7 +1245,9 @@ transform_args ast_converter::compute_table(
+                                  .inputs               = inputs,
+                                  .outputs              = std::move(outputs),
+                                  .string_offsets{},
+-                                 .row_size = row_size};
++                                 .row_size       = row_size,
++                                 .udf_expression = std::string{function_name},
++                                 .udf_fragments  = std::move(converter.udf_fragments_)};
+   if (get_context().dump_codegen()) {
+     std::cout << "Generated code for transform: \n" << result.udf << std::endl;
+   }
+diff --git a/cpp/src/jit/row_ir.hpp b/cpp/src/jit/row_ir.hpp
+index a0c667a375..48280e48c2 100644
+--- a/cpp/src/jit/row_ir.hpp
++++ b/cpp/src/jit/row_ir.hpp
+@@ -84,6 +84,14 @@ struct column_input {
+ 
+ using input = std::variant<scalar_input, column_input>;
+ 
++/**
++ * @brief An LTO-IR or fatbin fragment that a generated kernel must be linked with.
++ */
++struct [[nodiscard]] udf_fragment {
++  std::span<uint8_t const> data = {};                       ///< The fragment's bytes
++  lto_binary_type type          = lto_binary_type::LTO_IR;  ///< What `data` holds
++};
++
+ /**
+  * @brief The arguments needed to invoke a `cudf::transform`
+  */
+@@ -100,6 +108,8 @@ struct [[nodiscard]] transform_args {
+   std::vector<transform_output> outputs                    = {};
+   std::vector<std::unique_ptr<column>> string_offsets      = {};
+   std::optional<size_type> row_size                        = std::nullopt;
++  std::string udf_expression = {};  ///< The generated function, which the kernel calls by name
++  std::vector<udf_fragment> udf_fragments = {};  ///< LTO callees the kernel is linked with
+ };
+ 
+ struct node;
+@@ -118,6 +128,8 @@ struct [[nodiscard]] instance_context {
+   std::vector<var_info> input_vars_;           ///< The input variables for the IR
+   std::vector<untyped_var_info> output_vars_;  ///< The output variables for the IR
+   std::unordered_multimap<size_t, node const*> cse_nodes_;  ///< multimap of IR nodes
++  std::unordered_map<ast::jit::detail::udf_call const*, node const*>
++    udf_calls_;  ///< The first IR node converted from each AST call of a device function
+   cuda::stream_ref stream_;  ///< The CUDA stream for any device operations during IR generation
+   rmm::device_async_resource_ref
+     mr_;  ///< The device memory resource for any device memory allocation during IR generation
+@@ -176,6 +188,9 @@ struct [[nodiscard]] instance_context {
+   /**
+    * @brief Finds a structurally equivalent node belonging to a previously completed output.
+    *
++   * A call converted from an AST call that was already converted is equivalent to the first
++   * conversion, whatever its purity, so a call referred to more than once is evaluated once.
++   *
+    * @param candidate Node for which to find an equivalent common subexpression
+    * @return Equivalent node, or `nullptr` if none exists
+    */
+@@ -262,6 +277,25 @@ struct [[nodiscard]] output_reference {
+   constexpr bool operator!=(output_reference const& other) const { return index != other.index; }
+ };
+ 
++/**
++ * @brief A consumer-supplied device function called by a `UDF_CALL` node.
++ */
++struct [[nodiscard]] udf_info {
++  std::string symbol;                      ///< The function's unmangled name
++  std::span<uint8_t const> fragment = {};  ///< The LTO-IR or fatbin that defines the function
++  lto_binary_type fragment_type     = lto_binary_type::LTO_IR;  ///< What `fragment` holds
++  data_type output_type             = {};    ///< The type of the value the function writes
++  bool is_pure                      = true;  ///< Whether equal calls may share one evaluation
++
++  /// Whether two calls run the same function with the same output.
++  [[nodiscard]] bool operator==(udf_info const& other) const
++  {
++    return symbol == other.symbol && fragment.data() == other.fragment.data() &&
++           fragment.size() == other.fragment.size() && fragment_type == other.fragment_type &&
++           output_type == other.output_type && is_pure == other.is_pure;
++  }
++};
++
+ struct [[nodiscard]] node {
+  private:
+   std::variant<std::monostate, input_reference, output_reference> reference_ =
+@@ -288,6 +322,9 @@ struct [[nodiscard]] node {
+ 
+   node const* alias_ = nullptr;  ///< The equivalent IR node that this IR aliases, if any. This is
+                                  ///< used to avoid emitting duplicate code for equivalent IR nodes.
++  std::shared_ptr<udf_info const> udf_ = nullptr;  ///< The callee of a `UDF_CALL` node
++  ast::jit::detail::udf_call const* call_site_ =
++    nullptr;  ///< The AST call that a `UDF_CALL` node was converted from
+ 
+   /**
+    * @brief Computes the structural hash of this node and its arguments.
+@@ -370,6 +407,19 @@ struct [[nodiscard]] node {
+    */
+   node(input_reference input);
+ 
++  /**
++   * @brief Construct a node that calls a consumer-supplied device function.
++   *
++   * @param udf The function to call
++   * @param call_site The AST call this node is converted from
++   * @param error_policy How a row whose call fails is handled
++   * @param args The arguments of the call
++   */
++  node(udf_info udf,
++       ast::jit::detail::udf_call const& call_site,
++       error_policy error_policy,
++       std::vector<std::unique_ptr<node>> args);
++
+   /**
+    * @brief Construct a new output reference IR node
+    * @param reference The output variable reference
+@@ -434,6 +484,20 @@ struct [[nodiscard]] node {
+    */
+   [[nodiscard]] std::span<std::unique_ptr<node> const> get_args() const;
+ 
++  /**
++   * @brief Get the function a `UDF_CALL` node calls.
++   *
++   * @return The callee, or nullptr for any other node
++   */
++  [[nodiscard]] udf_info const* get_udf() const;
++
++  /**
++   * @brief Get the AST call a `UDF_CALL` node was converted from.
++   *
++   * @return The AST call, or nullptr for any other node
++   */
++  [[nodiscard]] ast::jit::detail::udf_call const* get_call_site() const;
++
+   /**
+    * @brief Returns `false` if this node forwards nulls from its inputs to its output.
+    * e.g., `ADD` operator is not null-aware because if any of its inputs is null, the output is
+@@ -474,9 +538,10 @@ struct [[nodiscard]] ast_converter {
+   cuda::stream_ref stream_;  ///< CUDA stream used for device memory operations and kernel launches.
+   rmm::device_async_resource_ref
+     mr_;  ///< Device memory resource used to allocate the returned table's device memory
+-  instance_context instance_;  ///< The instance context used during the IR generation
+-  table_view left_table_;      ///< The left input table for the expression
+-  table_view right_table_;     ///< The right input table for the expression
++  instance_context instance_;                ///< The instance context used during the IR generation
++  table_view left_table_;                    ///< The left input table for the expression
++  table_view right_table_;                   ///< The right input table for the expression
++  std::vector<udf_fragment> udf_fragments_;  ///< LTO callees found by generate_code
+ 
+  public:
+   /**
+@@ -518,6 +583,8 @@ struct [[nodiscard]] ast_converter {
+ 
+   [[nodiscard]] std::unique_ptr<row_ir::node> add_ir_node(ast::jit::detail::operation const& expr);
+ 
++  [[nodiscard]] std::unique_ptr<row_ir::node> add_ir_node(ast::jit::detail::udf_call const& expr);
++
+   /**
+    * @brief Converts multiple AST expressions into one generated transform function.
+    *
+@@ -525,7 +592,9 @@ struct [[nodiscard]] ast_converter {
+    *
+    * @param target Code generation target
+    * @param expressions AST expressions, one for each output column
+-   * @param function_name Name of the generated transform function
++   * @param function_name Name of the generated transform function. Declarations of the LTO
++   * callees it calls precede it, so kernels call it by this name instead of having the source
++   * parser rename the first function it finds
+    * @return Generated source, function null-awareness, and nullability policy for each output
+    */
+   [[nodiscard]] std::tuple<std::string, null_aware, std::vector<output_nullability>> generate_code(
+@@ -539,7 +608,8 @@ struct [[nodiscard]] ast_converter {
+    * @param expressions AST expressions, one for each output column
+    * @param left_table The left input table for the expression
+    * @param right_table The right input table for the expression
+-   * @param function_name The name of the generated function
++   * @param function_name The name of the generated function, which kernels call it by (see
++   * `generate_code`)
+    * @param stream CUDA stream used for device memory operations and kernel launches.
+    * @param mr Device memory resource used to allocate the returned table's device memory
+    * @return The result of the conversion, containing the transform arguments and scalar columns
+@@ -559,7 +629,8 @@ struct [[nodiscard]] ast_converter {
+    * @param expr The AST expression to convert
+    * @param left_table The left input table for the expression
+    * @param right_table The right input table for the expression
+-   * @param function_name The name of the generated function
++   * @param function_name The name of the generated function, which kernels call it by (see
++   * `generate_code`)
+    * @param stream CUDA stream used for device memory operations and kernel launches.
+    * @param mr Device memory resource used to allocate the returned table's device memory
+    * @return The result of the conversion, containing the filter arguments and scalar columns
+diff --git a/cpp/src/join/filter_join_indices/filter_join_indices_jit.cu b/cpp/src/join/filter_join_indices/filter_join_indices_jit.cu
+index 1b9ee1a827..881082141b 100644
+--- a/cpp/src/join/filter_join_indices/filter_join_indices_jit.cu
++++ b/cpp/src/join/filter_join_indices/filter_join_indices_jit.cu
+@@ -470,12 +470,15 @@ filter_join_indices_jit(cudf::table_view const& left,
+                                       filter_result.user_data.has_value(),
+                                       filter_result.is_null_aware == null_aware::YES);
+ 
+-  auto const cuda_source =
+-    cudf::jit::parse_single_function_cuda(filter_result.udf, "GENERIC_JOIN_FILTER_OP");
++  // The generated code is compiled as it is, linked with the LTO callees it calls.
++  auto const cuda_source = cudf::jit::define_operation(
++    filter_result.udf, "GENERIC_JOIN_FILTER_OP", filter_result.udf_expression);
+ 
+   auto kernel_name = rtcx::reflect_template("cudf::join::jit::filter_join_kernel", template_args);
+-  auto kernel      = cudf::jit::get_udf_kernel(
+-    "cudf/cpp/src/join/jit/filter_join_kernel.cu", kernel_name, cuda_source);
++  auto kernel      = cudf::jit::get_udf_kernel("cudf/cpp/src/join/jit/filter_join_kernel.cu",
++                                          kernel_name,
++                                          cuda_source,
++                                          filter_result.udf_fragments);
+ 
+   // Allocate and compute predicate results
+   auto predicate_results = rmm::device_uvector<bool>(left_indices.size(), stream);
+diff --git a/cpp/src/stream_compaction/filter/filter.cu b/cpp/src/stream_compaction/filter/filter.cu
+index 67cac939a6..a93db05247 100644
+--- a/cpp/src/stream_compaction/filter/filter.cu
++++ b/cpp/src/stream_compaction/filter/filter.cu
+@@ -83,6 +83,10 @@ std::unique_ptr<table> filter(table_view const& predicate_table,
+                                                           "filter_operation",
+                                                           stream,
+                                                           mr);
++  CUDF_EXPECTS(args.udf_fragments.empty(),
++               "The AST filter does not support JIT UDF calls; use compute_column_jit with "
++               "apply_retention_mask instead",
++               std::invalid_argument);
+ 
+   return detail::filter(args.udf,
+                         args.source_type,
+diff --git a/cpp/src/transform/transform.cu b/cpp/src/transform/transform.cu
+index 9706db3ad8..cbff1f867a 100644
+--- a/cpp/src/transform/transform.cu
++++ b/cpp/src/transform/transform.cu
+@@ -582,6 +582,30 @@ kernel get_kernel(bool is_null_aware,
+                      source_type);
+ }
+ 
++// The kernel for code that row IR generated from AST expressions. The code is compiled as it is,
++// called by the name of its generated function, and linked with the LTO callees it calls.
++kernel get_ast_kernel(bool is_null_aware,
++                      bool has_user_data,
++                      std::span<transform_input_spec const> inputs,
++                      std::span<transform_output_spec const> outputs,
++                      std::string const& udf,
++                      std::string_view udf_expression,
++                      std::span<detail::row_ir::udf_fragment const> udf_fragments)
++{
++  CUDF_FUNC_RANGE();
++  auto [in_types, out_types, ptx_in_types, ptx_out_types] =
++    reflect(udf_source_type::CUDA, inputs, outputs);
++  auto kernel_name = rtcx::reflect_template("cudf::jit::transform_kernel",
++                                            rtcx::reflect(is_null_aware),
++                                            rtcx::reflect(has_user_data),
++                                            in_types,
++                                            out_types);
++  return jit::get_udf_kernel("cudf/cpp/src/transform/jit/kernel.cu",
++                             kernel_name,
++                             jit::define_operation(udf, "GENERIC_TRANSFORM_OP", udf_expression),
++                             udf_fragments);
++}
++
+ void run(bool is_null_aware,
+          bool has_user_data,
+          size_type row_size,
+@@ -1210,6 +1234,39 @@ std::unique_ptr<table> execute_transform(std::string const& udf,
+   return std::make_unique<table>(std::move(finalized));
+ }
+ 
++// Runs the transform that row IR generated for AST expressions.
++std::unique_ptr<table> execute_ast_transform(detail::row_ir::transform_args&& args,
++                                             cuda::stream_ref stream,
++                                             rmm::device_async_resource_ref mr)
++{
++  perform_checks(args.source_type,
++                 args.is_null_aware,
++                 args.row_size,
++                 args.inputs,
++                 args.outputs,
++                 args.string_offsets);
++  auto input_specs  = jit_transform::make_input_specs(args.inputs);
++  auto output_specs = jit_transform::make_output_specs(args.outputs, args.string_offsets);
++  auto kernel       = jit_transform::get_ast_kernel(args.is_null_aware == null_aware::YES,
++                                              args.user_data.has_value(),
++                                              input_specs,
++                                              output_specs,
++                                              args.udf,
++                                              args.udf_expression,
++                                              args.udf_fragments);
++  return execute_transform(args.udf,
++                           args.source_type,
++                           args.is_null_aware,
++                           args.row_size,
++                           args.user_data,
++                           args.inputs,
++                           args.outputs,
++                           std::move(args.string_offsets),
++                           &kernel,
++                           stream,
++                           mr);
++}
++
+ }  // namespace
+ 
+ std::unique_ptr<table> transform(std::string const& udf,
+@@ -1289,17 +1346,7 @@ std::unique_ptr<column> compute_column_jit(table_view const& table,
+   std::array<std::reference_wrapper<ast::expression const>, 1> expressions{expr};
+   auto args = detail::row_ir::ast_converter::compute_table(
+     detail::row_ir::target::CUDA, expressions, table, {}, "compute_operation", stream, mr);
+-  auto result = transform(args.udf,
+-                          args.source_type,
+-                          args.is_null_aware,
+-                          args.user_data,
+-                          args.inputs,
+-                          args.outputs,
+-                          std::move(args.string_offsets),
+-                          args.row_size,
+-                          stream,
+-                          mr);
+-  auto cols   = result->release();
++  auto cols = execute_ast_transform(std::move(args), stream, mr)->release();
+   return std::move(cols[0]);
+ }
+ 
+@@ -1312,16 +1359,7 @@ std::unique_ptr<table> compute_table_jit(
+   CUDF_FUNC_RANGE();
+   auto args = detail::row_ir::ast_converter::compute_table(
+     detail::row_ir::target::CUDA, expressions, table, {}, "compute_operation", stream, mr);
+-  return transform(args.udf,
+-                   args.source_type,
+-                   args.is_null_aware,
+-                   args.user_data,
+-                   args.inputs,
+-                   args.outputs,
+-                   std::move(args.string_offsets),
+-                   args.row_size,
+-                   stream,
+-                   mr);
++  return execute_ast_transform(std::move(args), stream, mr);
+ }
+ 
+ // if we have a matching pre-compiled kernel fragment for the given transform configuration, return
+@@ -1446,17 +1484,27 @@ struct transform_program::impl {
+        null_aware is_null_aware,
+        std::optional<void*> user_data,
+        std::vector<transform_input_spec> inputs,
+-       std::vector<transform_output_spec> outputs)
++       std::vector<transform_output_spec> outputs,
++       std::string_view udf_expression                             = {},
++       std::span<detail::row_ir::udf_fragment const> udf_fragments = {})
+     : reflection_{jit_transform::reflect(source_type, inputs, outputs)},
+       source_type_{source_type},
+       is_null_aware_{is_null_aware},
+       user_data_{user_data},
+-      kernel_{jit_transform::get_kernel(is_null_aware_ == null_aware::YES,
+-                                        user_data_.has_value(),
+-                                        inputs,
+-                                        outputs,
+-                                        udf,
+-                                        source_type_)}
++      kernel_{udf_expression.empty()
++                ? jit_transform::get_kernel(is_null_aware_ == null_aware::YES,
++                                            user_data_.has_value(),
++                                            inputs,
++                                            outputs,
++                                            udf,
++                                            source_type_)
++                : jit_transform::get_ast_kernel(is_null_aware_ == null_aware::YES,
++                                                user_data_.has_value(),
++                                                inputs,
++                                                outputs,
++                                                udf,
++                                                udf_expression,
++                                                udf_fragments)}
+   {
+   }
+ 
+@@ -1521,7 +1569,9 @@ transform_program::transform_program(
+                            args.is_null_aware,
+                            args.user_data,
+                            jit_transform::make_input_specs(args.inputs),
+-                           jit_transform::make_output_specs(args.outputs, args.string_offsets));
++                           jit_transform::make_output_specs(args.outputs, args.string_offsets),
++                           args.udf_expression,
++                           args.udf_fragments);
+   CUDF_EXPECTS(args.inputs.size() == args.input_column_indices.size(),
+                "AST transform input metadata size mismatch");
+   for (auto i = std::size_t{0}; i < args.inputs.size(); ++i) {
